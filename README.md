@@ -2,6 +2,11 @@
 
 本仓库旨在基于 [veRL](https://github.com/volcengine/verl) 框架和，从零搭建一套支持大语言模型 (LLM) 进行 GRPO (Group Relative Policy Optimization) 训练的基础实验范式，主要面向 Math 和 Coding 推理任务。
 
+# 初始化项目
+```bash
+chmod +x ./setup.sh && ./setup.sh
+```
+
 # veRL 的安装
 ## AMD GPU
 ### 使用已预装 verl 的预构建 Docker 镜像
