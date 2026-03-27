@@ -17,5 +17,6 @@ uv pip install vllm --extra-index-url https://wheels.vllm.ai/rocm/
 
 echo "📦 正在安装其他依赖..."
 uv pip install verl ray deepspeed wandb pandas pyarrow
+uv pip install hf_transfer
 
 echo "🎉 环境初始化完成！"

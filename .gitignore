@@ -41,17 +41,18 @@ log/
 runtime_metrics.json
 
 ### 模型与训练产物 ###
+model/
 models/
 data/
 checkpoints/
 weights/
 saved_models/
-experiments/
 model.pth
 *.pt
 *.pth.tar
 *.ckpt
 best_model/*
+outputs/
 
 ### 容器环境特有忽略 ###
 # Docker内Jupyter临时目录
