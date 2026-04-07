@@ -51,7 +51,7 @@ def convert_row(row: pd.Series, index: int, split: str) -> dict:
     )
 
     return {
-        "data_source": "EleutherAI/hendrycks_math",
+        "data_source": "lighteval/MATH",  # verl 内置支持此 data_source 的 reward function
         "prompt": np.array(
             [{"role": "user", "content": prompt_text}], dtype=object
         ),
