@@ -51,7 +51,11 @@ else
   echo "🆗 模型目录存在: ${MODEL_PATH}"
 fi
 
-echo ">>> Prepare checkpoint dir"
+echo ">>> Prepare checkpoint dir (clean old checkpoints)"
+if ls "${CKPT_ROOT}"/global_step_* 1>/dev/null 2>&1; then
+  echo "  清理旧 checkpoint: ${CKPT_ROOT}/global_step_*"
+  rm -rf "${CKPT_ROOT}"/global_step_*
+fi
 mkdir -p "${CKPT_ROOT}"
 
 echo ">>> Test local model load"
