@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ============ 加载项目级 .env（每人各自的 key）============
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ -f "${PROJECT_ROOT}/.env" ]; then
+  set -a  # 自动 export
+  source "${PROJECT_ROOT}/.env"
+  set +a
+fi
+
 # ============ 基础环境 ============
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"  # checkpoint 根目录
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1  # AMD GPU 需要

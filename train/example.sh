@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ============ 加载项目级 .env（每人各自的 key）============
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ -f "${PROJECT_ROOT}/.env" ]; then
+  set -a  # 自动 export
+  source "${PROJECT_ROOT}/.env"
+  set +a
+fi
+
+# ============ 基础环境 ============
 # 这里设置 checkpoint 的根目录，以及 GPU 数量
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"  # 把根目录设置在 /etc/moreh/checkpoint 下，因为当前路径挂载的硬盘分区太小
-export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1  # 设置 GPU 可见设备为 1
+export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1  # AMD GPU 需要设置此项
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"  # 设置每个节点使用的 GPU 数量，当显卡数量不足的时候需要改小一点
+
+# ============ 模型与数据 ============
 export MODEL_PATH="${MODEL_PATH:-${HOST_CHECKPOINT_PATH}/Qwen2-1.5B}"  # 设置模型，默认路径是 /etc/moreh/checkpoint/，这里选择 Qwen2-1.5B
 export DATA_PATH="${DATA_PATH:-${HOST_CHECKPOINT_PATH}/data/gsm8k}"  # 设置数据，保存路径是 /etc/moreh/checkpoint/data/，这里选择 gsm8k
 export CKPT_ROOT="${CKPT_ROOT:-${HOST_CHECKPOINT_PATH}/GRPO-Baseline}"  # 设置 checkpoint 保存路径，默认路径是 /etc/moreh/checkpoint/
 
+# ============ Wandb ============
 # 这里分别设置 wandb 的入口、项目名称、实验名称（实验名称最好每次改一下，避免不记得）
 export WANDB_ENTITY="${WANDB_ENTITY:-qiuyc24-tsinghua-university}"  # 设置 wandb 的入口
 export WANDB_PROJECT="${WANDB_PROJECT:-GRPO-Baseline}"  # 设置 wandb 的项目名称
@@ -20,6 +33,14 @@ if [ ! -d "${DATA_PATH}" ]; then
   exit 1
 else
   echo "🆗 数据目录存在: ${DATA_PATH}"
+fi
+
+echo ">>> Check data files"
+if [ ! -f "${DATA_PATH}/train.parquet" ] || [ ! -f "${DATA_PATH}/test.parquet" ]; then
+  echo "❌ 数据文件不存在: train.parquet 或 test.parquet"
+  exit 1
+else
+  echo "🆗 数据文件存在"
 fi
 
 echo ">>> Check local model path"
