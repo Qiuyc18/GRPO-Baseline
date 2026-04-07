@@ -43,7 +43,6 @@ runtime_metrics.json
 ### 模型与训练产物 ###
 model/
 models/
-data/
 checkpoints/
 weights/
 saved_models/

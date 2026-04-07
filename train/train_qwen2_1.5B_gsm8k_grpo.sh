@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"
-export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1
-export MODEL_PATH="${MODEL_PATH:-${HOST_CHECKPOINT_PATH}/Qwen2-1.5B}"
-export DATA_PATH="${DATA_PATH:-${HOST_CHECKPOINT_PATH}/data/gsm8k}"
-export CKPT_ROOT="${CKPT_ROOT:-${HOST_CHECKPOINT_PATH}/GRPO-Baseline}"
+# ============ 基础环境 ============
+export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"  # checkpoint 根目录
+export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1  # AMD GPU 需要
+export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"  # 每个节点 GPU 数量，显卡不足时改小
 
+# ============ 模型与数据 ============
+export MODEL_PATH="${MODEL_PATH:-${HOST_CHECKPOINT_PATH}/Qwen2-1.5B}"  # 基座模型路径
+export DATA_PATH="${DATA_PATH:-${HOST_CHECKPOINT_PATH}/data/gsm8k}"    # 数据集路径
+export CKPT_ROOT="${CKPT_ROOT:-${HOST_CHECKPOINT_PATH}/GRPO-Baseline}" # checkpoint 保存路径
+
+# ============ Wandb ============
 export WANDB_ENTITY="${WANDB_ENTITY:-qiuyc24-tsinghua-university}"
 export WANDB_PROJECT="${WANDB_PROJECT:-GRPO-Baseline}"
-export WANDB_NAME="${WANDB_NAME:-verl-grpo-gsm8k-demo}"
-
-export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+export WANDB_NAME="${WANDB_NAME:-verl-grpo-gsm8k-demo}"  # 每次实验改一下名字
 
 echo ">>> Check local data path"
 if [ ! -d "${DATA_PATH}" ]; then
