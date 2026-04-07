@@ -13,12 +13,24 @@ CONTAINER_CHECKPOINT_PATH="${CONTAINER_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"
 # echo ">>> Pull image: ${IMAGE}"
 # docker pull "${IMAGE}"
 
-echo ">>> Remove old container if exists"
-docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+# 检查容器是否已存在
+if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+  # 容器存在，检查是否正在运行
+  if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    echo ">>> 容器正在运行，直接连接: ${CONTAINER_NAME}"
+    echo "    (如需重建容器，先运行: docker rm -f ${CONTAINER_NAME})"
+    exec docker exec -it "${CONTAINER_NAME}" /bin/bash
+  else
+    echo ">>> 容器已停止，重新启动并连接: ${CONTAINER_NAME}"
+    docker start "${CONTAINER_NAME}"
+    exec docker exec -it "${CONTAINER_NAME}" /bin/bash
+  fi
+fi
 
-echo ">>> Start container: ${CONTAINER_NAME}"
-docker run --rm -it \
+echo ">>> 创建新容器: ${CONTAINER_NAME}"
+docker run -d \
   --name "${CONTAINER_NAME}" \
+  --restart unless-stopped \
   --device /dev/dri \
   --device /dev/kfd \
   --group-add video \
@@ -36,4 +48,7 @@ docker run --rm -it \
   -e HOME="$HOME" \
   -e WANDB_API_KEY="${WANDB_API_KEY:-}" \
   -e RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1 \
-  "${IMAGE}" /bin/bash
+  "${IMAGE}" sleep infinity
+
+echo ">>> 连接容器"
+exec docker exec -it "${CONTAINER_NAME}" /bin/bash
