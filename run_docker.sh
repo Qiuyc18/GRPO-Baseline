@@ -17,11 +17,11 @@ CONTAINER_CHECKPOINT_PATH="${CONTAINER_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"
 if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
   # 容器存在，检查是否正在运行
   if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-    echo ">>> 容器正在运行，直接连接: ${CONTAINER_NAME}"
-    echo "    (如需重建容器，先运行: docker rm -f ${CONTAINER_NAME})"
+    echo ">>> 容器正在运行，将连接到已有容器: ${CONTAINER_NAME}"
+    echo ">>>>> PS: 如需重建容器，先运行: docker rm -f ${CONTAINER_NAME})"
     exec docker exec -it "${CONTAINER_NAME}" /bin/bash
   else
-    echo ">>> 容器已停止，重新启动并连接: ${CONTAINER_NAME}"
+    echo ">>> 容器已停止，将重新启动容器并连接: ${CONTAINER_NAME}"
     docker start "${CONTAINER_NAME}"
     exec docker exec -it "${CONTAINER_NAME}" /bin/bash
   fi
@@ -46,9 +46,11 @@ docker run -d \
   -v "${HOST_CHECKPOINT_PATH}:${CONTAINER_CHECKPOINT_PATH}" \
   -w "${CONTAINER_WORKDIR}" \
   -e HOME="$HOME" \
+  -e USER="$(id -un)" \
+  -e LANG="${LANG:-en_US.UTF-8}" \
   -e WANDB_API_KEY="${WANDB_API_KEY:-}" \
   -e RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1 \
   "${IMAGE}" sleep infinity
 
-echo ">>> 连接容器"
+echo ">>> 正在连接到容器: ${CONTAINER_NAME}"
 exec docker exec -it "${CONTAINER_NAME}" /bin/bash
