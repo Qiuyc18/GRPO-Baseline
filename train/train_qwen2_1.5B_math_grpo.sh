@@ -80,8 +80,17 @@ export GPU_PLATFORM=amd
 export GPU_MONITOR_OUTPUT=logs/verl
 export PYTHONPATH="${PROJECT_ROOT}/monitor:${PYTHONPATH:-}"
 
-echo ">>> Start GRPO training (MATH dataset) with W&B"
-PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
+# ============ 日志文件 ============
+LOG_DIR="${PROJECT_ROOT}/logs"
+mkdir -p "${LOG_DIR}"
+TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+LOG_FILE="${LOG_DIR}/math_grpo_${TIMESTAMP}.log"
+
+echo ">>> Start GRPO training (MATH dataset) with W&B (nohup)"
+echo "    日志文件: ${LOG_FILE}"
+echo "    停止训练: kill \$(cat ${LOG_DIR}/math_grpo.pid)"
+
+nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   data.train_files=${DATA_PATH}/train.parquet \
   data.val_files=${DATA_PATH}/test.parquet \
   data.train_batch_size=256 \
@@ -109,4 +118,14 @@ PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   trainer.nnodes=1 \
   trainer.save_freq=20 \
   trainer.test_freq=10 \
-  trainer.total_epochs=10
+  trainer.total_epochs=10 \
+  > "${LOG_FILE}" 2>&1 &
+
+TRAIN_PID=$!
+echo "${TRAIN_PID}" > "${LOG_DIR}/math_grpo.pid"
+echo "    训练进程 PID: ${TRAIN_PID}"
+echo ""
+echo ">>> 正在跟踪日志 (Ctrl+C 退出跟踪，训练不会停止)"
+echo "    重新查看: tail -f ${LOG_FILE}"
+echo "=========================================="
+tail -f "${LOG_FILE}"
