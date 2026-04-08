@@ -98,6 +98,7 @@ def process_split(raw_dir: Path, split: str) -> pd.DataFrame:
 
     rows = [convert_row(row, i, split) for i, (_, row) in enumerate(df_raw.iterrows())]
     df = pd.DataFrame(rows)
+    df["prompt_len"] = df["prompt"].apply(lambda x: len(x[0]["content"]))
 
     # 统计答案提取成功率
     n_empty = sum(1 for r in rows if r["reward_model"]["ground_truth"] == "")
@@ -130,6 +131,9 @@ def main():
         print(f"\n>>> 处理 {split} split")
         try:
             df = process_split(raw_dir, split)
+            print(f"最大prompt长度: {df['prompt_len'].max()}")
+            df.drop(columns=["prompt_len"], inplace=True)
+            df.reset_index(drop=True, inplace=True)
             out_path = out_dir / f"{split}.parquet"
             df.to_parquet(out_path, index=False)
             print(f"  ✅ 已保存: {out_path} ({len(df)} 行)")
