@@ -69,8 +69,13 @@ PY
 echo ">>> Check disk for checkpoint dir"
 df -h "${CKPT_ROOT}" || true
 
+# ============ GPU 监控 ============
+export GPU_PLATFORM=amd
+export GPU_MONITOR_OUTPUT=logs/verl
+export PYTHONPATH="${PROJECT_ROOT}/monitor:${PYTHONPATH:-}"
+
 echo ">>> Start GRPO training with W&B"
-PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
+PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   data.train_files=${DATA_PATH}/train.parquet \
   data.val_files=${DATA_PATH}/test.parquet \
   data.train_batch_size=256 \

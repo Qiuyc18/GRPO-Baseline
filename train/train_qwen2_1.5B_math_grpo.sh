@@ -21,7 +21,7 @@ export DATA_PATH="${DATA_PATH:-${HOST_CHECKPOINT_PATH}/data/math}"     # MATH �
 export CKPT_ROOT="${CKPT_ROOT:-${HOST_CHECKPOINT_PATH}/GRPO-Baseline/train_qwen2_1.5B_math_grpo}" # checkpoint 保存路径
 
 # ============ Wandb ============
-export WANDB_ENTITY="${WANDB_ENTITY:-qiuyc24-tsinghua-university}"
+export WANDB_ENTITY="${WANDB_ENTITY:-deng-lab}"
 export WANDB_PROJECT="${WANDB_PROJECT:-GRPO-Baseline}"
 export WANDB_NAME="${WANDB_NAME:-verl-grpo-math-qwen2-1.5B}"  # 每次实验改一下名字
 
@@ -71,23 +71,32 @@ PY
 echo ">>> Check disk for checkpoint dir"
 df -h "${CKPT_ROOT}" || true
 
+# ============ GPU 监控 ============
+# 如需启用 GPU 监控，参考 monitor/ 子模块（RL_GRPO_Monitor）的文档
+# export GPU_PLATFORM=amd
+# python3 -m monitor &
+
+export GPU_PLATFORM=amd
+export GPU_MONITOR_OUTPUT=logs/verl
+export PYTHONPATH="${PROJECT_ROOT}/monitor:${PYTHONPATH:-}"
+
 echo ">>> Start GRPO training (MATH dataset) with W&B"
-PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
+PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   data.train_files=${DATA_PATH}/train.parquet \
   data.val_files=${DATA_PATH}/test.parquet \
   data.train_batch_size=256 \
-  data.max_prompt_length=2048 \
-  data.max_response_length=3072 \
+  data.max_prompt_length=3072 \
+  data.max_response_length=2048 \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   actor_rollout_ref.actor.optim.lr=1e-6 \
   actor_rollout_ref.actor.ppo_mini_batch_size=64 \
-  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.rollout.n=5 \
   actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
   actor_rollout_ref.rollout.gpu_memory_utilization=0.8 \
-  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   algorithm.adv_estimator=grpo \
   algorithm.kl_ctrl.kl_coef=0.001 \
@@ -98,6 +107,6 @@ PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
   trainer.val_before_train=False \
   trainer.n_gpus_per_node="${GPUS_PER_NODE}" \
   trainer.nnodes=1 \
-  trainer.save_freq=10 \
+  trainer.save_freq=20 \
   trainer.test_freq=10 \
   trainer.total_epochs=10
