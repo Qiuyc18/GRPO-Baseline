@@ -14,10 +14,10 @@ fi
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"  # checkpoint 根目录
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1  # AMD GPU 需要
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"  # 每个节点 GPU 数量，显卡不足时改小
-export EXPERIMENT_NAME="train_qwen2_1.5B_math_grpo"
+export EXPERIMENT_NAME="train_qwen3_4B_math_grpo"
 
 # ============ 模型与数据 ============
-export MODEL_PATH="${MODEL_PATH:-${HOST_CHECKPOINT_PATH}/Qwen2-1.5B}"  # 基座模型路径
+export MODEL_PATH="${MODEL_PATH:-${HOST_CHECKPOINT_PATH}/Qwen3-4B}"  # 基座模型路径
 export DATA_PATH="${DATA_PATH:-${HOST_CHECKPOINT_PATH}/data/math}"     # MATH 数据集路径
 export CKPT_ROOT="${CKPT_ROOT:-${HOST_CHECKPOINT_PATH}/GRPO-Baseline/${EXPERIMENT_NAME}}" # checkpoint 保存路径
 
@@ -119,7 +119,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   trainer.nnodes=1 \
   trainer.save_freq=20 \
   trainer.test_freq=10 \
-  trainer.total_epochs=10 \
+  trainer.total_epochs=5 \
   > "${LOG_FILE}" 2>&1 &
 
 TRAIN_PID=$!
