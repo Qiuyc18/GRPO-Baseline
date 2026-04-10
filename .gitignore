@@ -52,6 +52,7 @@ model.pth
 *.ckpt
 best_model/*
 outputs/
+charts/
 
 ### 容器环境特有忽略 ###
 # Docker内Jupyter临时目录
