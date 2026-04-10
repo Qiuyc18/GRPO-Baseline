@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============ 加载项目级 .env（每人各自的 key）============
+# ============ 加载项目级 .env ============
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 if [ -f "${PROJECT_ROOT}/.env" ]; then
