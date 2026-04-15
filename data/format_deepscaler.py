@@ -13,6 +13,11 @@
     python3 data/format_deepscaler.py \
         --raw-dir /path/to/DeepScaleR-Preview-Dataset \
         --out-dir /path/to/output
+
+    # 4. 长度与数量筛选（可选）
+    python3 data/format_deepscaler.py \
+        --max-prompt-length 4096 \
+        --max-samples 10000
 """
 import argparse
 from pathlib import Path
@@ -38,6 +43,14 @@ def extract_boxed_answer(text: str) -> str | None:
     return None
 
 
+def build_prompt_text(problem: str) -> str:
+    """与 convert_row 中 user 消息一致的 prompt 文本（用于长度统计与过滤）。"""
+    return (
+        f"{problem} "
+        f"Let's think step by step and output the final answer in \\boxed{{}}."
+    )
+
+
 def convert_row(row: pd.Series, index: int) -> dict:
     """将 DeepScaleR 的一行转为 veRL 格式。"""
     problem = row["problem"]
@@ -47,10 +60,7 @@ def convert_row(row: pd.Series, index: int) -> dict:
     boxed = extract_boxed_answer(raw_answer)
     answer = boxed if boxed is not None else raw_answer.strip()
 
-    prompt_text = (
-        f"{problem} "
-        f"Let's think step by step and output the final answer in \\boxed{{}}."
-    )
+    prompt_text = build_prompt_text(str(problem))
 
     return {
         # veRL 内置 "lighteval/MATH" reward function，复用其评测逻辑
@@ -116,6 +126,20 @@ def main():
         help="测试集比例（DeepScaleR 无官方 test split，需手动切分）",
     )
     parser.add_argument("--seed", type=int, default=42, help="随机种子")
+    parser.add_argument(
+        "--max-prompt-length",
+        type=int,
+        default=None,
+        metavar="N",
+        help="若设置，则丢弃 prompt 字符长度大于 N 的样本（按 user content 计）",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        metavar="N",
+        help="若设置，则在其余筛选之后最多保留 N 条（随机抽样，种子见 --seed）",
+    )
     args = parser.parse_args()
 
     raw_dir = Path(args.raw_dir)
@@ -142,6 +166,29 @@ def main():
 
     print("\n>>> 转换为 veRL 格式")
     rows = [convert_row(row, i) for i, (_, row) in enumerate(df_raw.iterrows())]
+
+    if args.max_prompt_length is not None:
+        before = len(rows)
+        rows = [
+            r
+            for r in rows
+            if len(r["prompt"][0]["content"]) <= args.max_prompt_length
+        ]
+        print(
+            f"  长度限制 (≤{args.max_prompt_length}): {before} → {len(rows)} 行"
+        )
+
+    rng = np.random.default_rng(args.seed)
+    if args.max_samples is not None:
+        before = len(rows)
+        if args.max_samples < before:
+            pick = rng.choice(before, size=args.max_samples, replace=False)
+            rows = [rows[i] for i in sorted(pick)]
+        print(f"  数量筛选 (max_samples={args.max_samples}): {before} → {len(rows)} 行")
+
+    for i, r in enumerate(rows):
+        r["extra_info"]["index"] = i
+
     df = pd.DataFrame(rows)
 
     # 统计答案提取情况
@@ -151,7 +198,6 @@ def main():
 
     # 切分 train/test
     print(f"\n>>> 切分 train/test (test_ratio={args.test_ratio}, seed={args.seed})")
-    rng = np.random.default_rng(args.seed)
     n_test = max(1, int(len(df) * args.test_ratio))
     test_idx = rng.choice(len(df), size=n_test, replace=False)
     mask = np.zeros(len(df), dtype=bool)
