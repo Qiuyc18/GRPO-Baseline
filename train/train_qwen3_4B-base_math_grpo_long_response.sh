@@ -13,8 +13,9 @@ fi
 # ============ 基础环境 ============
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"  # checkpoint 根目录
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1  # AMD GPU 需要
-export GPUS_PER_NODE="${GPUS_PER_NODE:-4}"  # 每个节点 GPU 数量
-export EXPERIMENT_NAME="train_qwen3_4B-base_math_grpo_4gpu"
+export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"  # 每个节点 GPU 数量
+export EXPERIMENT_NAME="train_qwen3_4B-base_math_grpo_4k_response"
+export MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-4096}"
 
 # ============ 模型与数据 ============
 export MODEL_PATH="${MODEL_PATH:-${HOST_CHECKPOINT_PATH}/Qwen/Qwen3-4B-Base}"
@@ -89,40 +90,24 @@ echo "    日志文件: ${LOG_FILE}"
 echo "    停止训练: kill \$(cat ${LOG_DIR}/${EXPERIMENT_NAME}.pid)"
 
 # ============ 训练参数说明 ============
-# Qwen3-4B-Base, 4x AMD GPU, tensor_parallel=2 -> data_parallel=2
-#
-# [4 卡适配思路]
-#   保持每个 data-parallel rank 的样本负载接近原思路:
-#     train_batch_size: 128 (= 2 * 64)
-#
-#   若采用 micro_batch=4，并保持每个 DP rank 约 8 次累积:
-#     ppo_mini_batch_size: 64 (= 2 * 4 * 8)
-#
-#   其余显存相关参数先保持:
-#     gpu_memory_utilization=0.75
-#     log_prob_micro_batch=4
-#
-# 如果显存不够：
-#   1) 先把 ppo_micro_batch_size_per_gpu 从 4 降到 2
-#   2) 同时把 ppo_mini_batch_size 从 64 降到 32
-#   3) 再不够就打开 gradient checkpointing
+# Qwen3-4B-Base, 8x AMD GPU, tensor_parallel=2 -> data_parallel=4
 
 nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   data.train_files=${DATA_PATH}/train.parquet \
   data.val_files=${DATA_PATH}/test.parquet \
-  data.train_batch_size=64 \
+  data.train_batch_size=128 \
   data.max_prompt_length=3072 \
-  data.max_response_length=2048 \
+  data.max_response_length="${MAX_RESPONSE_LENGTH}" \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   actor_rollout_ref.actor.optim.lr=1e-6 \
   actor_rollout_ref.actor.ppo_mini_batch_size=16 \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
-  actor_rollout_ref.rollout.n=4 \
+  actor_rollout_ref.rollout.n=5 \
   actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
-  actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
+  actor_rollout_ref.rollout.tensor_model_parallel_size=4 \
   actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
-  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.model.enable_gradient_checkpointing=False \
   algorithm.adv_estimator=grpo \
   algorithm.kl_ctrl.kl_coef=0.001 \
@@ -135,7 +120,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   trainer.nnodes=1 \
   trainer.save_freq=20 \
   trainer.test_freq=10 \
-  trainer.total_epochs=2 \
+  trainer.total_epochs=3 \
   > "${LOG_FILE}" 2>&1 &
 
 TRAIN_PID=$!
