@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ============ 加载项目级 .env ============
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 if [ -f "${PROJECT_ROOT}/.env" ]; then
   set -a  # 自动 export
   source "${PROJECT_ROOT}/.env"
@@ -14,11 +14,11 @@ fi
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"  # checkpoint 根目录
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1  # AMD GPU 需要
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"  # 每个节点 GPU 数量
-export EXPERIMENT_NAME="test_qwen3_4B-base_gsm8k_grpo_offload_cache"
+export EXPERIMENT_NAME="test_qwen3_4B-base_deepscaler_grpo_4k"
 
 # ============ 模型与数据 ============
 export MODEL_PATH="${MODEL_PATH:-${HOST_CHECKPOINT_PATH}/Qwen/Qwen3-4B-Base}"
-export DATA_PATH="${DATA_PATH:-${HOST_CHECKPOINT_PATH}/data/gsm8k}"
+export DATA_PATH="${DATA_PATH:-${HOST_CHECKPOINT_PATH}/data/deepscaler}"
 export CKPT_ROOT="${CKPT_ROOT:-${HOST_CHECKPOINT_PATH}/GRPO-Baseline/${EXPERIMENT_NAME}}"
 
 # ============ Wandb ============
@@ -30,7 +30,8 @@ echo ">>> Check local data path"
 if [ ! -d "${DATA_PATH}" ]; then
   echo "❌ 数据目录不存在: ${DATA_PATH}"
   echo "请先运行:"
-  echo "  python3 data/preprocess_gsm8k.py"
+  echo "  python3 download.py download agentica-org/DeepScaleR-Preview-Dataset --type dataset"
+  echo "  python3 data/format_deepscaler.py"
   exit 1
 else
   echo "🆗 数据目录存在: ${DATA_PATH}"
@@ -39,7 +40,7 @@ fi
 echo ">>> Check data files"
 if [ ! -f "${DATA_PATH}/train.parquet" ] || [ ! -f "${DATA_PATH}/test.parquet" ]; then
   echo "❌ 数据文件不存在: train.parquet 或 test.parquet"
-  echo "请先运行: python3 data/format_EleutherAI_hendrycks_math.py"
+  echo "请先运行: python3 data/format_deepscaler.py"
   exit 1
 else
   echo "🆗 数据文件存在"
@@ -96,7 +97,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   data.train_files=${DATA_PATH}/train.parquet \
   data.val_files=${DATA_PATH}/test.parquet \
   data.train_batch_size=896 \
-  data.max_prompt_length=512 \
+  data.max_prompt_length=384 \
   data.max_response_length=1024 \
   data.filter_overlong_prompts=True \
   data.truncation='error' \
