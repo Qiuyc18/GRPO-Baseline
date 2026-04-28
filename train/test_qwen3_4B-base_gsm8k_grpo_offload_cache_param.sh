@@ -14,11 +14,11 @@ fi
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"  # checkpoint 根目录
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1  # AMD GPU 需要
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"  # 每个节点 GPU 数量
-export EXPERIMENT_NAME="train_qwen3_4B-base_math_grpo"
+export EXPERIMENT_NAME="test_qwen3_4B-base_gsm8k_grpo_offload_cache_param"
 
 # ============ 模型与数据 ============
 export MODEL_PATH="${MODEL_PATH:-${HOST_CHECKPOINT_PATH}/Qwen/Qwen3-4B-Base}"
-export DATA_PATH="${DATA_PATH:-${HOST_CHECKPOINT_PATH}/data/math}"
+export DATA_PATH="${DATA_PATH:-${HOST_CHECKPOINT_PATH}/data/gsm8k}"
 export CKPT_ROOT="${CKPT_ROOT:-${HOST_CHECKPOINT_PATH}/GRPO-Baseline/${EXPERIMENT_NAME}}"
 
 # ============ Wandb ============
@@ -30,7 +30,7 @@ echo ">>> Check local data path"
 if [ ! -d "${DATA_PATH}" ]; then
   echo "❌ 数据目录不存在: ${DATA_PATH}"
   echo "请先运行:"
-  echo "  python3 data/preprocess_math.py"
+  echo "  python3 data/preprocess_gsm8k.py"
   exit 1
 else
   echo "🆗 数据目录存在: ${DATA_PATH}"
@@ -92,35 +92,51 @@ echo "    停止训练: kill \$(cat ${LOG_DIR}/${EXPERIMENT_NAME}.pid)"
 # Qwen3-4B-Base, 8x AMD GPU, tensor_parallel=2 -> data_parallel=4
 
 nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
+  algorithm.adv_estimator=grpo \
   data.train_files=${DATA_PATH}/train.parquet \
   data.val_files=${DATA_PATH}/test.parquet \
-  data.train_batch_size=128 \
-  data.max_prompt_length=3072 \
-  data.max_response_length=2048 \
+  data.train_batch_size=1024 \
+  data.max_prompt_length=512 \
+  data.max_response_length=1024 \
+  data.filter_overlong_prompts=True \
+  data.truncation='error' \
+  reward_model.strategy=fsdp2 \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
+  actor_rollout_ref.model.use_remove_padding=True \
+  actor_rollout_ref.model.enable_gradient_checkpointing=True \
+  actor_rollout_ref.actor.entropy_checkpointing=True \
+  actor_rollout_ref.actor.strategy=fsdp2 \
   actor_rollout_ref.actor.optim.lr=1e-6 \
-  actor_rollout_ref.actor.ppo_mini_batch_size=32 \
-  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
-  actor_rollout_ref.rollout.n=5 \
-  actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
+  actor_rollout_ref.actor.ppo_mini_batch_size=256 \
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=32 \
+  actor_rollout_ref.actor.use_kl_loss=True \
+  actor_rollout_ref.actor.kl_loss_coef=0.001 \
+  actor_rollout_ref.actor.kl_loss_type=low_var_kl \
+  actor_rollout_ref.actor.entropy_coeff=0 \
+  actor_rollout_ref.actor.fsdp_config.forward_prefetch=True \
+  actor_rollout_ref.actor.fsdp_config.param_offload=True \
+  actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=32 \
   actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
+  actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
-  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
-  actor_rollout_ref.model.enable_gradient_checkpointing=False \
+  actor_rollout_ref.rollout.n=5 \
   actor_rollout_ref.rollout.free_cache_engine=True \
-  algorithm.adv_estimator=grpo \
-  algorithm.kl_ctrl.kl_coef=0.001 \
+  actor_rollout_ref.ref.strategy=fsdp2 \
+  actor_rollout_ref.ref.entropy_from_logits_with_chunking=True \
+  actor_rollout_ref.ref.fsdp_config.param_offload=True \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=32 \
+  algorithm.use_kl_in_reward=False \
+  trainer.critic_warmup=0 \
   trainer.logger='["console","wandb"]' \
   trainer.project_name="${WANDB_PROJECT}" \
   trainer.experiment_name="${WANDB_NAME}" \
   trainer.default_local_dir="${CKPT_ROOT}" \
-  trainer.val_before_train=False \
   trainer.n_gpus_per_node="${GPUS_PER_NODE}" \
   trainer.nnodes=1 \
-  trainer.save_freq=20 \
-  trainer.test_freq=10 \
-  trainer.total_epochs=3 \
+  trainer.save_freq=999 \
+  trainer.test_freq=5 \
+  trainer.total_epochs=10 \
   > "${LOG_FILE}" 2>&1 &
 
 TRAIN_PID=$!
