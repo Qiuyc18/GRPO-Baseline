@@ -126,19 +126,35 @@ def print_summary(overall: dict, per_step: pd.DataFrame):
           f"max={per_step['utilization'].max()*100:.2f}%")
 
 
-def plot_per_step(per_step: pd.DataFrame, output_path: Path):
-    """Plot per-step bubble ratio and utilization."""
-    fig, axes = plt.subplots(1, 1, figsize=(14, 5))
-
-    x = per_step["step"].values
+def plot_per_step(per_step_by_run: list[tuple[str, pd.DataFrame]], output_path: Path):
+    """Plot per-step bubble ratio for one or more runs."""
+    fig, axes = plt.subplots(1, 1, figsize=(6, 3))
 
     yticks = np.arange(0, 101, 20)
+    colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["#4C72B0"])
 
     # Bubble ratio per step
     ax = axes
-    ax.plot(x, per_step["bubble_ratio"].values * 100, color="#C44E52", linewidth=2.0, alpha=0.9)
-    ax.axhline(per_step["bubble_ratio"].mean() * 100, color="black", linestyle="--",
-               linewidth=1, label=f"Mean: {per_step['bubble_ratio'].mean()*100:.1f}%")
+    for idx, (run_name, per_step) in enumerate(per_step_by_run):
+        if per_step.empty:
+            continue
+        x = per_step["step"].values
+        y = per_step["bubble_ratio"].values * 100
+        color = colors[idx % len(colors)]
+        ax.plot(x, y, color=color, linewidth=2.0, alpha=0.9, label=run_name)
+        mean_y = per_step["bubble_ratio"].mean() * 100
+        ax.axhline(mean_y, color=color, linestyle="--", linewidth=1, alpha=0.9)
+        x_text = x.max() if len(x) > 0 else 1
+        ax.text(
+            x_text + 0.2,
+            mean_y,
+            f"{mean_y:.1f}%",
+            color=color,
+            va="center",
+            ha="left",
+            fontsize=9,
+        )
+
     ax.set_xlabel("Step")
     ax.set_ylabel("Bubble Ratio (%)")
     ax.set_title("Rollout Bubble Ratio per Step")
@@ -149,36 +165,50 @@ def plot_per_step(per_step: pd.DataFrame, output_path: Path):
     ax.legend()
 
     plt.tight_layout()
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"\nChart saved to: {output_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="GPU Bubble Ratio analysis for Rollout phase")
-    parser.add_argument("log_dir", type=str, help="Path to log directory")
+    parser.add_argument(
+        "--log-dirs",
+        type=str,
+        nargs="+",
+        required=True,
+        help="One or more log directories",
+    )
     parser.add_argument("-o", "--output-dir", type=str, default=None)
     parser.add_argument("--no-plot", action="store_true")
     args = parser.parse_args()
 
-    log_dir = Path(args.log_dir)
-    events = pd.read_csv(log_dir / "gpu_events.csv")
-    metrics = pd.read_csv(log_dir / "gpu_metrics.csv")
-    Q = metrics["gpu_id"].nunique()
+    log_dirs = [Path(p) for p in args.log_dirs]
+    if len(log_dirs) > 2 and args.output_dir is None:
+        parser.error("When specifying more than two --log-dirs, --output-dir is required.")
 
-    intervals = build_rollout_intervals(events)
-    rollout_metrics = filter_metrics_by_intervals(metrics, intervals)
-    print(f"Loaded {len(metrics)} metric rows, {len(rollout_metrics)} in rollout phases")
+    per_step_by_run = []
+    for log_dir in log_dirs:
+        events = pd.read_csv(log_dir / "gpu_events.csv")
+        metrics = pd.read_csv(log_dir / "gpu_metrics.csv")
+        Q = metrics["gpu_id"].nunique()
 
-    overall = compute_bubble(rollout_metrics, Q)
-    per_step = compute_per_step_bubble(metrics, intervals, Q)
+        intervals = build_rollout_intervals(events)
+        rollout_metrics = filter_metrics_by_intervals(metrics, intervals)
+        print(
+            f"[{log_dir.name}] Loaded {len(metrics)} metric rows, "
+            f"{len(rollout_metrics)} in rollout phases"
+        )
 
-    print_summary(overall, per_step)
+        overall = compute_bubble(rollout_metrics, Q)
+        per_step = compute_per_step_bubble(metrics, intervals, Q)
+        print_summary(overall, per_step)
+        per_step_by_run.append((log_dir.name, per_step))
 
     if not args.no_plot:
-        out_dir = Path(args.output_dir) if args.output_dir else log_dir
+        out_dir = Path(args.output_dir) if args.output_dir else log_dirs[0]
         out_dir.mkdir(parents=True, exist_ok=True)
-        plot_per_step(per_step, out_dir / "bubble_rollout.png")
+        plot_per_step(per_step_by_run, out_dir / "bubble_rollout.png")
 
 
 if __name__ == "__main__":

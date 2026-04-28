@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""统计 MATH 数据集 prompt 长度并绘制直方图。"""
+"""统计数据集 prompt 长度并绘制直方图。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import pandas as pd
 
 
 DEFAULT_DATASET_NAME = "math"
-DEFAULT_DATA_PATH = f"/etc/moreh/checkpoint/data/{DEFAULT_DATASET_NAME}"
+DEFAULT_DATA_PATH = f"/etc/moreh/checkpoint/data/"
 DEFAULT_OUTPUT_PATH = f"data/{DEFAULT_DATASET_NAME}_prompt_length_hist.png"
 DEFAULT_TOKENIZER_PATH = "/etc/moreh/checkpoint/Qwen/Qwen3-4B-Base/"
 
@@ -24,7 +24,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-path",
         default=DEFAULT_DATA_PATH,
-        help=f"数据路径，可传目录（含 train/test parquet）或单个 parquet 文件，默认: {DEFAULT_DATA_PATH}",
+        help=f"数据集存放路径，默认: {DEFAULT_DATA_PATH}",
+    )
+    parser.add_argument(
+        "--dataset",
+        default=DEFAULT_DATASET_NAME,
+        help=f"数据集名称，默认: {DEFAULT_DATASET_NAME}",
     )
     parser.add_argument(
         "--split",
@@ -51,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        default=DEFAULT_OUTPUT_PATH,
+        default="",
         help=f"输出图片路径，默认: {DEFAULT_OUTPUT_PATH}",
     )
     parser.add_argument(
@@ -180,6 +185,7 @@ def plot_hist(lengths: np.ndarray, bins: int, output_path: Path, length_unit: st
 def main() -> int:
     args = parse_args()
     data_path = Path(args.data_path)
+    data_path = data_path / args.dataset
     files = resolve_input_files(data_path, args.split)
     length_fn = build_length_fn(args.length_unit, args.tokenizer)
 
@@ -189,6 +195,11 @@ def main() -> int:
 
     lengths = np.array([length_fn(text) for text in prompt_texts], dtype=np.int64)
     stats = summarize(lengths)
+
+    if not args.output:
+        output_path = DEFAULT_OUTPUT_PATH
+    else:
+        output_path = f"data/{args.dataset}_prompt_length_hist.png"
 
     output_path = Path(args.output)
     plot_hist(lengths, args.bins, output_path, args.length_unit)
