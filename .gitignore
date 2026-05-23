@@ -83,7 +83,8 @@ wandb/
 # 使用.gitkeep保留空目录结构，但不跟踪其他内容
 
 ### 参考代码 ###
-verl-src/
+# verl-src/
 
 ### 输出结果 ###
 plot
+.cache

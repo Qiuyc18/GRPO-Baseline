@@ -76,7 +76,7 @@ df -h "${CKPT_ROOT}" || true
 # ============ GPU 监控 ============
 export GPU_PLATFORM=amd
 export GPU_MONITOR_OUTPUT=logs/${EXPERIMENT_NAME}
-export PYTHONPATH="${PROJECT_ROOT}/monitor:${PYTHONPATH:-}"
+export PYTHONPATH="${PROJECT_ROOT}/verl-src:${PROJECT_ROOT}/monitor:${PYTHONPATH:-}"
 
 # ============ 日志文件 ============
 LOG_DIR="${PROJECT_ROOT}/logs"
