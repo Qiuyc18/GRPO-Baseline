@@ -28,9 +28,9 @@ export EXPERIMENT_NAME="${EXPERIMENT_NAME:-train_qwen3_4B-base_deepscaler_grpo_4
 
 # Optional: pin this run to specific devices, for example GPU_DEVICES=4,5,6,7.
 if [ -n "${GPU_DEVICES:-}" ]; then
-  unset HIP_VISIBLE_DEVICES
-  unset CUDA_VISIBLE_DEVICES
-  export ROCR_VISIBLE_DEVICES="${GPU_DEVICES}"
+  export HIP_VISIBLE_DEVICES="${GPU_DEVICES}"
+  unset ROCR_VISIBLE_DEVICES
+  export CUDA_VISIBLE_DEVICES="${GPU_DEVICES}"
 fi
 
 # ============ Model, data, cache ============
@@ -130,9 +130,9 @@ PY
 fi
 
 if [ -n "${GPU_DEVICES:-}" ]; then
-  unset HIP_VISIBLE_DEVICES
-  unset CUDA_VISIBLE_DEVICES
-  export ROCR_VISIBLE_DEVICES="${GPU_DEVICES}"
+  export HIP_VISIBLE_DEVICES="${GPU_DEVICES}"
+  unset ROCR_VISIBLE_DEVICES
+  export CUDA_VISIBLE_DEVICES="${GPU_DEVICES}"
 fi
 
 # Replay knobs. p_fresh=0.5 keeps half the steps fresh by default, which is a
@@ -140,6 +140,9 @@ fi
 export REPLAY_BUFFER_MAX_SIZE="${REPLAY_BUFFER_MAX_SIZE:-64}"
 export REPLAY_BUFFER_P_FRESH="${REPLAY_BUFFER_P_FRESH:-0.5}"
 export REPLAY_BUFFER_HOT_CACHE_SIZE="${REPLAY_BUFFER_HOT_CACHE_SIZE:-4}"
+export REPLAY_BUFFER_SPEC_VERIFY="${REPLAY_BUFFER_SPEC_VERIFY:-False}"
+export REPLAY_BUFFER_SPEC_VERIFY_MIN_MEAN_LOGPROB_DELTA="${REPLAY_BUFFER_SPEC_VERIFY_MIN_MEAN_LOGPROB_DELTA:--1.0}"
+export REPLAY_BUFFER_SPEC_VERIFY_MIN_SEQ_LOGPROB_DELTA="${REPLAY_BUFFER_SPEC_VERIFY_MIN_SEQ_LOGPROB_DELTA:--5.0}"
 
 echo ">>> Check local data path"
 if [ ! -d "${DATA_PATH}" ]; then
@@ -197,7 +200,15 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="${LOG_DIR}/${EXPERIMENT_NAME}_${TIMESTAMP}.log"
 HYDRA_OUTPUT_DIR="${HYDRA_OUTPUT_DIR:-${LOG_DIR}/hydra_outputs/${EXPERIMENT_NAME}_${TIMESTAMP}}"
 export GPU_MONITOR_OUTPUT="${GPU_MONITOR_OUTPUT:-${LOG_DIR}/monitor/${EXPERIMENT_NAME}_${TIMESTAMP}}"
+if [ "${DUMP_VALIDATION_GENERATIONS:-0}" = "1" ]; then
+  export VALIDATION_DATA_DIR="${VALIDATION_DATA_DIR:-${LOG_DIR}/validation_generations/${EXPERIMENT_NAME}_${TIMESTAMP}}"
+else
+  export VALIDATION_DATA_DIR="${VALIDATION_DATA_DIR:-}"
+fi
 mkdir -p "${GPU_MONITOR_OUTPUT}"
+if [ -n "${VALIDATION_DATA_DIR}" ]; then
+  mkdir -p "${VALIDATION_DATA_DIR}"
+fi
 PID_FILE="${LOG_DIR}/${EXPERIMENT_NAME}_${TIMESTAMP}.pid"
 LATEST_PID_FILE="${LOG_DIR}/${EXPERIMENT_NAME}.pid"
 
@@ -207,6 +218,7 @@ echo "    Stop: kill \$(cat ${PID_FILE})"
 echo "    Replay cache: ${REPLAY_BUFFER_DIR}"
 echo "    GPUS_PER_NODE=${GPUS_PER_NODE}, GPU_DEVICES=${GPU_DEVICES:-all visible}"
 echo "    GPU_MONITOR_OUTPUT=${GPU_MONITOR_OUTPUT}"
+echo "    VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-disabled}"
 
 nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   hydra.run.dir="${HYDRA_OUTPUT_DIR}" \
@@ -252,6 +264,9 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   +algorithm.replay_buffer.max_size="${REPLAY_BUFFER_MAX_SIZE}" \
   +algorithm.replay_buffer.p_fresh="${REPLAY_BUFFER_P_FRESH}" \
   +algorithm.replay_buffer.hot_cache_size="${REPLAY_BUFFER_HOT_CACHE_SIZE}" \
+  +algorithm.replay_buffer.spec_verify="${REPLAY_BUFFER_SPEC_VERIFY}" \
+  +algorithm.replay_buffer.spec_verify_min_mean_logprob_delta="${REPLAY_BUFFER_SPEC_VERIFY_MIN_MEAN_LOGPROB_DELTA}" \
+  +algorithm.replay_buffer.spec_verify_min_seq_logprob_delta="${REPLAY_BUFFER_SPEC_VERIFY_MIN_SEQ_LOGPROB_DELTA}" \
   trainer.critic_warmup=0 \
   trainer.logger="${TRAIN_LOGGER}" \
   trainer.project_name="${WANDB_PROJECT}" \
@@ -261,6 +276,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   trainer.nnodes=1 \
   trainer.save_freq="${SAVE_FREQ}" \
   trainer.test_freq="${TEST_FREQ}" \
+  trainer.validation_data_dir="${VALIDATION_DATA_DIR}" \
   trainer.total_epochs="${TOTAL_EPOCHS}" \
   trainer.max_actor_ckpt_to_keep=3 \
   > "${LOG_FILE}" 2>&1 &

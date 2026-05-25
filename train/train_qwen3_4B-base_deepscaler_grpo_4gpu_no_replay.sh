@@ -28,9 +28,9 @@ export EXPERIMENT_NAME="${EXPERIMENT_NAME:-train_qwen3_4B-base_deepscaler_grpo_4
 
 # Optional: pin this run to specific devices, for example GPU_DEVICES=0,1,2,3.
 if [ -n "${GPU_DEVICES:-}" ]; then
-  unset HIP_VISIBLE_DEVICES
-  unset CUDA_VISIBLE_DEVICES
-  export ROCR_VISIBLE_DEVICES="${GPU_DEVICES}"
+  export HIP_VISIBLE_DEVICES="${GPU_DEVICES}"
+  unset ROCR_VISIBLE_DEVICES
+  export CUDA_VISIBLE_DEVICES="${GPU_DEVICES}"
 fi
 
 # ============ Model and data ============
@@ -68,71 +68,6 @@ export TEST_FREQ="${TEST_FREQ:-20}"
 export CLEAN_OLD_CKPT="${CLEAN_OLD_CKPT:-1}"
 export SKIP_MODEL_LOAD_TEST="${SKIP_MODEL_LOAD_TEST:-0}"
 export FOLLOW_LOG="${FOLLOW_LOG:-1}"
-export AUTO_SELECT_GPUS="${AUTO_SELECT_GPUS:-1}"
-
-if [ -z "${GPU_DEVICES:-}" ] && [ "${AUTO_SELECT_GPUS}" = "1" ]; then
-  echo ">>> Auto-select free GPUs with rocm-smi"
-  GPU_DEVICES="$(python3 - <<PY
-import os
-import re
-import subprocess
-import sys
-
-need = int(os.environ.get("GPUS_PER_NODE", "4"))
-util = float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.72"))
-try:
-    out = subprocess.check_output(
-        ["rocm-smi", "--showmeminfo", "vram"],
-        text=True,
-        stderr=subprocess.DEVNULL,
-    )
-except Exception as exc:
-    print(f"Failed to run rocm-smi: {exc}", file=sys.stderr)
-    sys.exit(1)
-
-total_by_gpu = {}
-used_by_gpu = {}
-for line in out.splitlines():
-    m = re.search(r"GPU\\[(\\d+)\\].*VRAM Total Memory \\(B\\):\\s*(\\d+)", line)
-    if m:
-        total_by_gpu[int(m.group(1))] = int(m.group(2))
-    m = re.search(r"GPU\\[(\\d+)\\].*VRAM Total Used Memory \\(B\\):\\s*(\\d+)", line)
-    if m:
-        used_by_gpu[int(m.group(1))] = int(m.group(2))
-
-candidates = []
-for gpu in sorted(total_by_gpu):
-    total = total_by_gpu[gpu]
-    used = used_by_gpu.get(gpu, 0)
-    free = total - used
-    required = total * util
-    if free >= required:
-        candidates.append(gpu)
-
-if len(candidates) < need:
-    print(
-        f"Need {need} GPUs with free VRAM >= {util:.2%} of total, "
-        f"but only found {len(candidates)}: {candidates}",
-        file=sys.stderr,
-    )
-    for gpu in sorted(total_by_gpu):
-        total = total_by_gpu[gpu]
-        used = used_by_gpu.get(gpu, 0)
-        free_gib = (total - used) / 1024**3
-        total_gib = total / 1024**3
-        print(f"GPU {gpu}: free={free_gib:.2f}/{total_gib:.2f} GiB", file=sys.stderr)
-    sys.exit(2)
-
-print(",".join(str(gpu) for gpu in candidates[:need]))
-PY
-)"
-fi
-
-if [ -n "${GPU_DEVICES:-}" ]; then
-  unset HIP_VISIBLE_DEVICES
-  unset CUDA_VISIBLE_DEVICES
-  export ROCR_VISIBLE_DEVICES="${GPU_DEVICES}"
-fi
 
 echo ">>> Check local data path"
 if [ ! -d "${DATA_PATH}" ]; then
