@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Full DeepScaleR GRPO run on Qwen3-4B-Base, 4 GPUs, with replay buffer and
-# strict speculative-style verification.
-# Intended to compare against the no-replay, naive replay, and loose
-# spec-verify runs.
+# DeepScaleR GRPO run on Qwen3-4B-Base, 4 GPUs, with replay buffer plus
+# NAT-style token-efficient actor updates.
+# Defaults to RPC with 50% target token keep ratio.
 
 # ============ Load project .env ============
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +25,7 @@ mkdir -p "${HF_DATASETS_CACHE}" "${HF_HUB_CACHE}" "${TRANSFORMERS_CACHE}"
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1
 export GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
-export EXPERIMENT_NAME="${EXPERIMENT_NAME:-train_qwen3_4B-base_deepscaler_grpo_4gpu_replay_buffer_spec_verify_strict}"
+export EXPERIMENT_NAME="${EXPERIMENT_NAME:-train_qwen3_4B-base_deepscaler_grpo_4gpu_replay_buffer_nat_rpc}"
 
 # Optional: pin this run to specific devices, for example GPU_DEVICES=4,5,6,7.
 if [ -n "${GPU_DEVICES:-}" ]; then
@@ -147,6 +146,15 @@ export REPLAY_BUFFER_SPEC_VERIFY="${REPLAY_BUFFER_SPEC_VERIFY:-True}"
 export REPLAY_BUFFER_SPEC_VERIFY_MIN_MEAN_LOGPROB_DELTA="${REPLAY_BUFFER_SPEC_VERIFY_MIN_MEAN_LOGPROB_DELTA:--0.2}"
 export REPLAY_BUFFER_SPEC_VERIFY_MIN_SEQ_LOGPROB_DELTA="${REPLAY_BUFFER_SPEC_VERIFY_MIN_SEQ_LOGPROB_DELTA:--2.0}"
 
+# NAT knobs. RPC can shorten the actor update micro-batch to the sampled max
+# prefix while keeping rollout and verifier reward on the full response.
+export NAT_TOKEN_SAMPLING="${NAT_TOKEN_SAMPLING:-True}"
+export NAT_MODE="${NAT_MODE:-rpc}"
+export NAT_KEEP_RATIO="${NAT_KEEP_RATIO:-0.5}"
+export NAT_MIN_TOKENS="${NAT_MIN_TOKENS:-1}"
+export NAT_TRUNCATE_RPC="${NAT_TRUNCATE_RPC:-True}"
+export NAT_EPS="${NAT_EPS:-1e-6}"
+
 echo ">>> Check local data path"
 if [ ! -d "${DATA_PATH}" ]; then
   echo "Data directory does not exist: ${DATA_PATH}"
@@ -215,10 +223,11 @@ fi
 PID_FILE="${LOG_DIR}/${EXPERIMENT_NAME}_${TIMESTAMP}.pid"
 LATEST_PID_FILE="${LOG_DIR}/${EXPERIMENT_NAME}.pid"
 
-echo ">>> Start full DeepScaleR GRPO training, replay buffer enabled"
+echo ">>> Start DeepScaleR GRPO training, replay buffer + NAT token sampling enabled"
 echo "    Log file: ${LOG_FILE}"
 echo "    Stop: kill \$(cat ${PID_FILE})"
 echo "    Replay cache: ${REPLAY_BUFFER_DIR}"
+echo "    NAT: enabled=${NAT_TOKEN_SAMPLING}, mode=${NAT_MODE}, keep_ratio=${NAT_KEEP_RATIO}, truncate_rpc=${NAT_TRUNCATE_RPC}"
 echo "    GPUS_PER_NODE=${GPUS_PER_NODE}, GPU_DEVICES=${GPU_DEVICES:-all visible}"
 echo "    GPU_MONITOR_OUTPUT=${GPU_MONITOR_OUTPUT}"
 echo "    VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-disabled}"
@@ -241,6 +250,12 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   actor_rollout_ref.actor.optim.lr=1e-6 \
   actor_rollout_ref.actor.ppo_mini_batch_size="${PPO_MINI_BATCH_SIZE}" \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="${PPO_MICRO_BATCH_SIZE_PER_GPU}" \
+  actor_rollout_ref.actor.token_sampling.enabled="${NAT_TOKEN_SAMPLING}" \
+  actor_rollout_ref.actor.token_sampling.mode="${NAT_MODE}" \
+  actor_rollout_ref.actor.token_sampling.keep_ratio="${NAT_KEEP_RATIO}" \
+  actor_rollout_ref.actor.token_sampling.min_tokens="${NAT_MIN_TOKENS}" \
+  actor_rollout_ref.actor.token_sampling.truncate_rpc="${NAT_TRUNCATE_RPC}" \
+  actor_rollout_ref.actor.token_sampling.eps="${NAT_EPS}" \
   actor_rollout_ref.actor.use_kl_loss=True \
   actor_rollout_ref.actor.kl_loss_coef=0.001 \
   actor_rollout_ref.actor.kl_loss_type=low_var_kl \

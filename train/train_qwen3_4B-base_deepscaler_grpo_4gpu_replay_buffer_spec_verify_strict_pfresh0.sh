@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Full DeepScaleR GRPO run on Qwen3-4B-Base, 4 GPUs, with replay buffer and
 # strict speculative-style verification.
-# Intended to compare against the no-replay, naive replay, and loose
-# spec-verify runs.
+# This variant sets p_fresh=0.0 to test whether verification can safely replace
+# explicit fresh sampling once the buffer is warm.
 
 # ============ Load project .env ============
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +26,7 @@ mkdir -p "${HF_DATASETS_CACHE}" "${HF_HUB_CACHE}" "${TRANSFORMERS_CACHE}"
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1
 export GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
-export EXPERIMENT_NAME="${EXPERIMENT_NAME:-train_qwen3_4B-base_deepscaler_grpo_4gpu_replay_buffer_spec_verify_strict}"
+export EXPERIMENT_NAME="${EXPERIMENT_NAME:-train_qwen3_4B-base_deepscaler_grpo_4gpu_replay_buffer_spec_verify_strict_pfresh0}"
 
 # Optional: pin this run to specific devices, for example GPU_DEVICES=4,5,6,7.
 if [ -n "${GPU_DEVICES:-}" ]; then
@@ -138,10 +138,10 @@ if [ -n "${GPU_DEVICES:-}" ]; then
   export CUDA_VISIBLE_DEVICES="${GPU_DEVICES}"
 fi
 
-# Replay knobs. p_fresh=0.5 keeps half the steps fresh by default, which is a
-# safer full-training setting than the smoke test's forced replay mode.
+# Replay knobs. p_fresh=0.0 forces the run to try cache first after warmup; spec
+# verification still rejects stale cached trajectories and falls back to fresh.
 export REPLAY_BUFFER_MAX_SIZE="${REPLAY_BUFFER_MAX_SIZE:-64}"
-export REPLAY_BUFFER_P_FRESH="${REPLAY_BUFFER_P_FRESH:-0.5}"
+export REPLAY_BUFFER_P_FRESH="${REPLAY_BUFFER_P_FRESH:-0.0}"
 export REPLAY_BUFFER_HOT_CACHE_SIZE="${REPLAY_BUFFER_HOT_CACHE_SIZE:-4}"
 export REPLAY_BUFFER_SPEC_VERIFY="${REPLAY_BUFFER_SPEC_VERIFY:-True}"
 export REPLAY_BUFFER_SPEC_VERIFY_MIN_MEAN_LOGPROB_DELTA="${REPLAY_BUFFER_SPEC_VERIFY_MIN_MEAN_LOGPROB_DELTA:--0.2}"
