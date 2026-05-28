@@ -131,7 +131,7 @@ fi
 
 # NAT knobs. RPC shortens actor update micro-batches to the sampled max prefix.
 # Rollout generation, reward, and validation still use full fresh responses.
-export NAT_TOKEN_SAMPLING="${NAT_TOKEN_SAMPLING:-True}"
+export NAT_TOKEN_SAMPLING="${NAT_TOKEN_SAMPLING:-False}"
 export NAT_MODE="${NAT_MODE:-rpc}"
 export NAT_KEEP_RATIO="${NAT_KEEP_RATIO:-0.5}"
 export NAT_MIN_TOKENS="${NAT_MIN_TOKENS:-1}"
