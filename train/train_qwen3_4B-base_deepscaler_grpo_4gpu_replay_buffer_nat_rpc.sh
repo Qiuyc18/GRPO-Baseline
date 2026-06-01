@@ -149,9 +149,12 @@ export REPLAY_BUFFER_SPEC_VERIFY_MIN_SEQ_LOGPROB_DELTA="${REPLAY_BUFFER_SPEC_VER
 # NAT knobs. RPC can shorten the actor update micro-batch to the sampled max
 # prefix while keeping rollout and verifier reward on the full response.
 export NAT_TOKEN_SAMPLING="${NAT_TOKEN_SAMPLING:-True}"
-export NAT_MODE="${NAT_MODE:-rpc}"
+export NAT_MODE="${NAT_MODE:-rpc_urs}"
 export NAT_KEEP_RATIO="${NAT_KEEP_RATIO:-0.5}"
 export NAT_MIN_TOKENS="${NAT_MIN_TOKENS:-1}"
+export NAT_TRUNCATE_RATIO="${NAT_TRUNCATE_RATIO:-0.5}"
+export NAT_TRUNCATE_MIN_TOKENS="${NAT_TRUNCATE_MIN_TOKENS:-256}"
+export NAT_SAMPLE_MIN_TOKENS="${NAT_SAMPLE_MIN_TOKENS:-64}"
 export NAT_TRUNCATE_RPC="${NAT_TRUNCATE_RPC:-True}"
 export NAT_EPS="${NAT_EPS:-1e-6}"
 
@@ -227,7 +230,7 @@ echo ">>> Start DeepScaleR GRPO training, replay buffer + NAT token sampling ena
 echo "    Log file: ${LOG_FILE}"
 echo "    Stop: kill \$(cat ${PID_FILE})"
 echo "    Replay cache: ${REPLAY_BUFFER_DIR}"
-echo "    NAT: enabled=${NAT_TOKEN_SAMPLING}, mode=${NAT_MODE}, keep_ratio=${NAT_KEEP_RATIO}, truncate_rpc=${NAT_TRUNCATE_RPC}"
+echo "    NAT: enabled=${NAT_TOKEN_SAMPLING}, mode=${NAT_MODE}, keep_ratio=${NAT_KEEP_RATIO}, truncate_ratio=${NAT_TRUNCATE_RATIO}, truncate_min=${NAT_TRUNCATE_MIN_TOKENS}, sample_min=${NAT_SAMPLE_MIN_TOKENS}, truncate_rpc=${NAT_TRUNCATE_RPC}"
 echo "    GPUS_PER_NODE=${GPUS_PER_NODE}, GPU_DEVICES=${GPU_DEVICES:-all visible}"
 echo "    GPU_MONITOR_OUTPUT=${GPU_MONITOR_OUTPUT}"
 echo "    VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-disabled}"
@@ -254,6 +257,9 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   actor_rollout_ref.actor.token_sampling.mode="${NAT_MODE}" \
   actor_rollout_ref.actor.token_sampling.keep_ratio="${NAT_KEEP_RATIO}" \
   actor_rollout_ref.actor.token_sampling.min_tokens="${NAT_MIN_TOKENS}" \
+  actor_rollout_ref.actor.token_sampling.truncate_ratio="${NAT_TRUNCATE_RATIO}" \
+  actor_rollout_ref.actor.token_sampling.truncate_min_tokens="${NAT_TRUNCATE_MIN_TOKENS}" \
+  actor_rollout_ref.actor.token_sampling.sample_min_tokens="${NAT_SAMPLE_MIN_TOKENS}" \
   actor_rollout_ref.actor.token_sampling.truncate_rpc="${NAT_TRUNCATE_RPC}" \
   actor_rollout_ref.actor.token_sampling.eps="${NAT_EPS}" \
   actor_rollout_ref.actor.use_kl_loss=True \

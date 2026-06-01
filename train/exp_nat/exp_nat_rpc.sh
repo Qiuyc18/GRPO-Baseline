@@ -4,8 +4,7 @@ set -euo pipefail
 # DeepScaleR GRPO run on Qwen3-4B-Base, 8 GPUs.
 # Rollout stays fresh/no-replay; NAT token sampling is used only in actor updates.
 
-# ============ Load project .env ============
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ============ Project paths ============
 PROJECT_ROOT="/home/qinghua/qiuyc/tsinghua/GRPO-Baseline/"
 
 # Keep datasets cache out of a possibly root-owned ~/.cache/huggingface tree.
@@ -21,7 +20,7 @@ export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 export EXPERIMENT_NAME="${EXPERIMENT_NAME:-exp_nat_rpc}"
 
-# Optional: pin this run to specific devices, for example GPU_DEVICES=0,1,2,3,4,5,6,7.
+# Set GPU_DEVICES=0,1,2,3,4,5,6,7 to pin the run. Empty means all visible GPUs.
 if [ -n "${GPU_DEVICES:-}" ]; then
   export HIP_VISIBLE_DEVICES="${GPU_DEVICES}"
   unset ROCR_VISIBLE_DEVICES
@@ -56,78 +55,13 @@ export LOG_PROB_MICRO_BATCH_SIZE_PER_GPU="${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU:-4
 export TENSOR_MODEL_PARALLEL_SIZE="${TENSOR_MODEL_PARALLEL_SIZE:-2}"
 export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.72}"
 export MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-12288}"
-export TOTAL_EPOCHS="${TOTAL_EPOCHS:-4}"
+export TOTAL_EPOCHS="${TOTAL_EPOCHS:-5}"
 export SAVE_FREQ="${SAVE_FREQ:-20}"
 export TEST_FREQ="${TEST_FREQ:-5}"
 export CLEAN_OLD_CKPT="${CLEAN_OLD_CKPT:-1}"
 export SKIP_MODEL_LOAD_TEST="${SKIP_MODEL_LOAD_TEST:-0}"
 export FOLLOW_LOG="${FOLLOW_LOG:-1}"
-export AUTO_SELECT_GPUS="${AUTO_SELECT_GPUS:-1}"
 export DUMP_VALIDATION_GENERATIONS="${DUMP_VALIDATION_GENERATIONS:-1}"
-
-if [ -z "${GPU_DEVICES:-}" ] && [ "${AUTO_SELECT_GPUS}" = "1" ]; then
-  echo ">>> Auto-select free GPUs with rocm-smi"
-  GPU_DEVICES="$(python3 - <<PY
-import os
-import re
-import subprocess
-import sys
-
-need = int(os.environ.get("GPUS_PER_NODE", "8"))
-util = float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.72"))
-try:
-    out = subprocess.check_output(
-        ["rocm-smi", "--showmeminfo", "vram"],
-        text=True,
-        stderr=subprocess.DEVNULL,
-    )
-except Exception as exc:
-    print(f"Failed to run rocm-smi: {exc}", file=sys.stderr)
-    sys.exit(1)
-
-total_by_gpu = {}
-used_by_gpu = {}
-for line in out.splitlines():
-    m = re.search(r"GPU\\[(\\d+)\\].*VRAM Total Memory \\(B\\):\\s*(\\d+)", line)
-    if m:
-        total_by_gpu[int(m.group(1))] = int(m.group(2))
-    m = re.search(r"GPU\\[(\\d+)\\].*VRAM Total Used Memory \\(B\\):\\s*(\\d+)", line)
-    if m:
-        used_by_gpu[int(m.group(1))] = int(m.group(2))
-
-candidates = []
-for gpu in sorted(total_by_gpu):
-    total = total_by_gpu[gpu]
-    used = used_by_gpu.get(gpu, 0)
-    free = total - used
-    required = total * util
-    if free >= required:
-        candidates.append(gpu)
-
-if len(candidates) < need:
-    print(
-        f"Need {need} GPUs with free VRAM >= {util:.2%} of total, "
-        f"but only found {len(candidates)}: {candidates}",
-        file=sys.stderr,
-    )
-    for gpu in sorted(total_by_gpu):
-        total = total_by_gpu[gpu]
-        used = used_by_gpu.get(gpu, 0)
-        free_gib = (total - used) / 1024**3
-        total_gib = total / 1024**3
-        print(f"GPU {gpu}: free={free_gib:.2f}/{total_gib:.2f} GiB", file=sys.stderr)
-    sys.exit(2)
-
-print(",".join(str(gpu) for gpu in candidates[:need]))
-PY
-)"
-fi
-
-if [ -n "${GPU_DEVICES:-}" ]; then
-  export HIP_VISIBLE_DEVICES="${GPU_DEVICES}"
-  unset ROCR_VISIBLE_DEVICES
-  export CUDA_VISIBLE_DEVICES="${GPU_DEVICES}"
-fi
 
 # NAT knobs. RPC shortens actor update micro-batches to the sampled max prefix.
 # Rollout generation, reward, and validation still use full fresh responses.

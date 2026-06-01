@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# DeepScaleR pure GRPO baseline run on Qwen3-4B-Base, 8 GPUs.
-# Fresh rollout only: no replay buffer, spec-verify, or NAT token sampling.
+# DeepScaleR GRPO run on Qwen3-4B-Base, 8 GPUs.
+# Rollout stays fresh/no-replay; NAT token sampling is used only in actor updates.
 
 # ============ Project paths ============
 PROJECT_ROOT="/home/qinghua/qiuyc/tsinghua/GRPO-Baseline/"
@@ -18,7 +18,7 @@ mkdir -p "${HF_DATASETS_CACHE}" "${HF_HUB_CACHE}" "${TRANSFORMERS_CACHE}"
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
-export EXPERIMENT_NAME="${EXPERIMENT_NAME:-exp_grpo_baseline_20epoch}"
+export EXPERIMENT_NAME="${EXPERIMENT_NAME:-exp_nat_rpc_urs}"
 
 # Set GPU_DEVICES=0,1,2,3,4,5,6,7 to pin the run. Empty means all visible GPUs.
 if [ -n "${GPU_DEVICES:-}" ]; then
@@ -55,13 +55,25 @@ export LOG_PROB_MICRO_BATCH_SIZE_PER_GPU="${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU:-4
 export TENSOR_MODEL_PARALLEL_SIZE="${TENSOR_MODEL_PARALLEL_SIZE:-2}"
 export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.72}"
 export MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-12288}"
-export TOTAL_EPOCHS="${TOTAL_EPOCHS:-20}"
+export TOTAL_EPOCHS="${TOTAL_EPOCHS:-5}"
 export SAVE_FREQ="${SAVE_FREQ:-20}"
 export TEST_FREQ="${TEST_FREQ:-5}"
 export CLEAN_OLD_CKPT="${CLEAN_OLD_CKPT:-1}"
 export SKIP_MODEL_LOAD_TEST="${SKIP_MODEL_LOAD_TEST:-0}"
 export FOLLOW_LOG="${FOLLOW_LOG:-1}"
 export DUMP_VALIDATION_GENERATIONS="${DUMP_VALIDATION_GENERATIONS:-1}"
+
+# NAT knobs. RPC shortens actor update micro-batches to the sampled max prefix.
+# Rollout generation, reward, and validation still use full fresh responses.
+export NAT_TOKEN_SAMPLING="${NAT_TOKEN_SAMPLING:-True}"
+export NAT_MODE="${NAT_MODE:-rpc_urs}"
+export NAT_KEEP_RATIO="${NAT_KEEP_RATIO:-0.5}"
+export NAT_MIN_TOKENS="${NAT_MIN_TOKENS:-1}"
+export NAT_TRUNCATE_RATIO="${NAT_TRUNCATE_RATIO:-0.5}"
+export NAT_TRUNCATE_MIN_TOKENS="${NAT_TRUNCATE_MIN_TOKENS:-256}"
+export NAT_SAMPLE_MIN_TOKENS="${NAT_SAMPLE_MIN_TOKENS:-64}"
+export NAT_TRUNCATE_RPC="${NAT_TRUNCATE_RPC:-True}"
+export NAT_EPS="${NAT_EPS:-1e-6}"
 
 echo ">>> Check local data path"
 if [ ! -d "${DATA_PATH}" ]; then
@@ -130,11 +142,10 @@ fi
 PID_FILE="${LOG_DIR}/${EXPERIMENT_NAME}_${TIMESTAMP}.pid"
 LATEST_PID_FILE="${LOG_DIR}/${EXPERIMENT_NAME}.pid"
 
-echo ">>> Start DeepScaleR pure GRPO baseline training"
+echo ">>> Start DeepScaleR GRPO training, fresh rollout + NAT token sampling"
 echo "    Log file: ${LOG_FILE}"
 echo "    Stop: kill \$(cat ${PID_FILE})"
-echo "    Baseline: fresh rollout, no replay/spec-verify/NAT token sampling"
-echo "    TOTAL_EPOCHS=${TOTAL_EPOCHS}"
+echo "    NAT: enabled=${NAT_TOKEN_SAMPLING}, mode=${NAT_MODE}, keep_ratio=${NAT_KEEP_RATIO}, truncate_ratio=${NAT_TRUNCATE_RATIO}, truncate_min=${NAT_TRUNCATE_MIN_TOKENS}, sample_min=${NAT_SAMPLE_MIN_TOKENS}, truncate_rpc=${NAT_TRUNCATE_RPC}"
 echo "    GPUS_PER_NODE=${GPUS_PER_NODE}, GPU_DEVICES=${GPU_DEVICES:-all visible}"
 echo "    GPU_MONITOR_OUTPUT=${GPU_MONITOR_OUTPUT}"
 echo "    VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-disabled}"
@@ -157,6 +168,15 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   actor_rollout_ref.actor.optim.lr=1e-6 \
   actor_rollout_ref.actor.ppo_mini_batch_size="${PPO_MINI_BATCH_SIZE}" \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="${PPO_MICRO_BATCH_SIZE_PER_GPU}" \
+  actor_rollout_ref.actor.token_sampling.enabled="${NAT_TOKEN_SAMPLING}" \
+  actor_rollout_ref.actor.token_sampling.mode="${NAT_MODE}" \
+  actor_rollout_ref.actor.token_sampling.keep_ratio="${NAT_KEEP_RATIO}" \
+  actor_rollout_ref.actor.token_sampling.min_tokens="${NAT_MIN_TOKENS}" \
+  actor_rollout_ref.actor.token_sampling.truncate_ratio="${NAT_TRUNCATE_RATIO}" \
+  actor_rollout_ref.actor.token_sampling.truncate_min_tokens="${NAT_TRUNCATE_MIN_TOKENS}" \
+  actor_rollout_ref.actor.token_sampling.sample_min_tokens="${NAT_SAMPLE_MIN_TOKENS}" \
+  actor_rollout_ref.actor.token_sampling.truncate_rpc="${NAT_TRUNCATE_RPC}" \
+  actor_rollout_ref.actor.token_sampling.eps="${NAT_EPS}" \
   actor_rollout_ref.actor.use_kl_loss=True \
   actor_rollout_ref.actor.kl_loss_coef=0.001 \
   actor_rollout_ref.actor.kl_loss_type=low_var_kl \
