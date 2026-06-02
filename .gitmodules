@@ -1,3 +1,7 @@
 [submodule "monitor"]
 	path = monitor
 	url = git@github-shared:Qiuyc18/RL_GRPO_Monitor.git
+[submodule "verl-src"]
+	path = verl-src
+	url = git@qiuyc.github.com:Qiuyc18/verl.git
+	branch = feat/grpo-replay-buffer

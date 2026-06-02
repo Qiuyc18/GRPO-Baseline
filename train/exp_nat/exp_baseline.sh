@@ -5,7 +5,7 @@ set -euo pipefail
 # Fresh rollout only: no replay buffer, spec-verify, or NAT token sampling.
 
 # ============ Project paths ============
-PROJECT_ROOT="/home/qinghua/qiuyc/tsinghua/GRPO-Baseline/"
+PROJECT_ROOT="${PROJECT_ROOT:-/home/moreh/qiuyc/tsinghua/GRPO-Baseline}"
 
 # Keep datasets cache out of a possibly root-owned ~/.cache/huggingface tree.
 export HF_HOME="${HF_HOME:-${PROJECT_ROOT}/.cache/huggingface}"
@@ -56,6 +56,7 @@ export TENSOR_MODEL_PARALLEL_SIZE="${TENSOR_MODEL_PARALLEL_SIZE:-2}"
 export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.72}"
 export MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-12288}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-20}"
+export SEED="${SEED:-42}"
 export SAVE_FREQ="${SAVE_FREQ:-20}"
 export TEST_FREQ="${TEST_FREQ:-5}"
 export CLEAN_OLD_CKPT="${CLEAN_OLD_CKPT:-1}"
@@ -135,6 +136,7 @@ echo "    Log file: ${LOG_FILE}"
 echo "    Stop: kill \$(cat ${PID_FILE})"
 echo "    Baseline: fresh rollout, no replay/spec-verify/NAT token sampling"
 echo "    TOTAL_EPOCHS=${TOTAL_EPOCHS}"
+echo "    SEED=${SEED}"
 echo "    GPUS_PER_NODE=${GPUS_PER_NODE}, GPU_DEVICES=${GPU_DEVICES:-all visible}"
 echo "    GPU_MONITOR_OUTPUT=${GPU_MONITOR_OUTPUT}"
 echo "    VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-disabled}"
@@ -148,6 +150,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   data.max_response_length="${MAX_RESPONSE_LENGTH}" \
   data.filter_overlong_prompts=True \
   data.truncation='error' \
+  data.seed="${SEED}" \
   reward_model.strategy=fsdp2 \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   actor_rollout_ref.model.use_remove_padding=True \
