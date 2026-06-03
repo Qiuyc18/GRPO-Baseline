@@ -5,7 +5,7 @@ set -euo pipefail
 # Rollout stays fresh/no-replay; NAT token sampling is used only in actor updates.
 
 # ============ Project paths ============
-PROJECT_ROOT="/home/qinghua/qiuyc/tsinghua/GRPO-Baseline/"
+PROJECT_ROOT="${PROJECT_ROOT:-/home/moreh/qiuyc/tsinghua/GRPO-Baseline}"
 
 # Keep datasets cache out of a possibly root-owned ~/.cache/huggingface tree.
 export HF_HOME="${HF_HOME:-${PROJECT_ROOT}/.cache/huggingface}"
@@ -117,7 +117,7 @@ df -h "${CKPT_ROOT}" || true
 
 # ============ GPU monitor ============
 export GPU_PLATFORM=amd
-export PYTHONPATH="${PROJECT_ROOT}/verl-src:${PROJECT_ROOT}/monitor:${PYTHONPATH:-}"
+export PYTHONPATH="${PROJECT_ROOT}/verl-src/verl:${PROJECT_ROOT}/monitor:${PYTHONPATH:-}"
 
 # ============ Log file ============
 LOG_DIR="${PROJECT_ROOT}/logs"
