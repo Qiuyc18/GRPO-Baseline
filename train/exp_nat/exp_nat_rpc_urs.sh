@@ -56,12 +56,13 @@ export TENSOR_MODEL_PARALLEL_SIZE="${TENSOR_MODEL_PARALLEL_SIZE:-2}"
 export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.72}"
 export MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-12288}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-5}"
-export SAVE_FREQ="${SAVE_FREQ:-20}"
+export SAVE_FREQ="${SAVE_FREQ:--1}"
 export TEST_FREQ="${TEST_FREQ:-5}"
 export CLEAN_OLD_CKPT="${CLEAN_OLD_CKPT:-1}"
 export SKIP_MODEL_LOAD_TEST="${SKIP_MODEL_LOAD_TEST:-0}"
 export FOLLOW_LOG="${FOLLOW_LOG:-1}"
 export DUMP_VALIDATION_GENERATIONS="${DUMP_VALIDATION_GENERATIONS:-1}"
+export SEED="${SEED:-1}"
 
 # NAT knobs. RPC shortens actor update micro-batches to the sampled max prefix.
 # Rollout generation, reward, and validation still use full fresh responses.
@@ -146,6 +147,7 @@ echo ">>> Start DeepScaleR GRPO training, fresh rollout + NAT token sampling"
 echo "    Log file: ${LOG_FILE}"
 echo "    Stop: kill \$(cat ${PID_FILE})"
 echo "    NAT: enabled=${NAT_TOKEN_SAMPLING}, mode=${NAT_MODE}, keep_ratio=${NAT_KEEP_RATIO}, truncate_ratio=${NAT_TRUNCATE_RATIO}, truncate_min=${NAT_TRUNCATE_MIN_TOKENS}, sample_min=${NAT_SAMPLE_MIN_TOKENS}, truncate_rpc=${NAT_TRUNCATE_RPC}"
+echo "    SEED=${SEED}"
 echo "    GPUS_PER_NODE=${GPUS_PER_NODE}, GPU_DEVICES=${GPU_DEVICES:-all visible}"
 echo "    GPU_MONITOR_OUTPUT=${GPU_MONITOR_OUTPUT}"
 echo "    VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-disabled}"
@@ -159,6 +161,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   data.max_response_length="${MAX_RESPONSE_LENGTH}" \
   data.filter_overlong_prompts=True \
   data.truncation='error' \
+  data.seed="${SEED}" \
   reward_model.strategy=fsdp2 \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   actor_rollout_ref.model.use_remove_padding=True \
@@ -190,6 +193,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.gpu_memory_utilization="${GPU_MEMORY_UTILIZATION}" \
   actor_rollout_ref.rollout.n="${ROLLOUT_N}" \
+  actor_rollout_ref.rollout.seed="${SEED}" \
   actor_rollout_ref.rollout.free_cache_engine=True \
   actor_rollout_ref.ref.strategy=fsdp2 \
   actor_rollout_ref.ref.entropy_from_logits_with_chunking=True \

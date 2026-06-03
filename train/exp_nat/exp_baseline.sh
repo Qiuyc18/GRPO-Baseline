@@ -5,7 +5,7 @@ set -euo pipefail
 # Fresh rollout only: no replay buffer, spec-verify, or NAT token sampling.
 
 # ============ Project paths ============
-PROJECT_ROOT="${PROJECT_ROOT:-/home/moreh/qiuyc/tsinghua/GRPO-Baseline}"
+PROJECT_ROOT="/home/qinghua/qiuyc/tsinghua/GRPO-Baseline/"
 
 # Keep datasets cache out of a possibly root-owned ~/.cache/huggingface tree.
 export HF_HOME="${HF_HOME:-${PROJECT_ROOT}/.cache/huggingface}"
@@ -55,14 +55,14 @@ export LOG_PROB_MICRO_BATCH_SIZE_PER_GPU="${LOG_PROB_MICRO_BATCH_SIZE_PER_GPU:-4
 export TENSOR_MODEL_PARALLEL_SIZE="${TENSOR_MODEL_PARALLEL_SIZE:-2}"
 export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.72}"
 export MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-12288}"
-export TOTAL_EPOCHS="${TOTAL_EPOCHS:-20}"
-export SEED="${SEED:-42}"
-export SAVE_FREQ="${SAVE_FREQ:-20}"
+export TOTAL_EPOCHS="${TOTAL_EPOCHS:-5}"
+export SAVE_FREQ="${SAVE_FREQ:--1}"
 export TEST_FREQ="${TEST_FREQ:-5}"
 export CLEAN_OLD_CKPT="${CLEAN_OLD_CKPT:-1}"
 export SKIP_MODEL_LOAD_TEST="${SKIP_MODEL_LOAD_TEST:-0}"
 export FOLLOW_LOG="${FOLLOW_LOG:-1}"
 export DUMP_VALIDATION_GENERATIONS="${DUMP_VALIDATION_GENERATIONS:-1}"
+export SEED="${SEED:-42}"
 
 echo ">>> Check local data path"
 if [ ! -d "${DATA_PATH}" ]; then
@@ -173,6 +173,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.gpu_memory_utilization="${GPU_MEMORY_UTILIZATION}" \
   actor_rollout_ref.rollout.n="${ROLLOUT_N}" \
+  actor_rollout_ref.rollout.seed="${SEED}" \
   actor_rollout_ref.rollout.free_cache_engine=True \
   actor_rollout_ref.ref.strategy=fsdp2 \
   actor_rollout_ref.ref.entropy_from_logits_with_chunking=True \
