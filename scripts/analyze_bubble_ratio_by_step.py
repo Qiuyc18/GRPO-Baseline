@@ -39,65 +39,98 @@ def filter_metrics_by_intervals(metrics: pd.DataFrame, intervals: list[tuple[flo
     return metrics[mask].copy()
 
 
-def compute_bubble(metrics: pd.DataFrame, Q: int) -> dict:
-    """Compute bubble ratio from filtered metrics.
-
-    Returns dict with per-step and overall statistics.
-    """
-    # Group by timestamp, compute r_k = sum(gpu_util / 100) per timestamp
+def build_metric_cells(metrics: pd.DataFrame) -> pd.DataFrame:
+    """Convert point samples into midpoint-bounded time cells."""
     grouped = metrics.groupby("timestamp").agg(
         r_k=("gpu_utilization", lambda x: x.sum() / 100.0),
         n_gpus=("gpu_id", "count"),
     ).sort_index()
 
     timestamps = grouped.index.values
-    r_k = grouped["r_k"].values
+    if len(timestamps) == 0:
+        return pd.DataFrame(columns=["start", "end", "timestamp", "r_k", "n_gpus"])
 
-    # Compute Δt_k (use midpoint rule: half the gap to next + half the gap to prev)
-    dt = np.zeros(len(timestamps))
     if len(timestamps) > 1:
-        gaps = np.diff(timestamps)
-        # Cap gaps to avoid counting inter-interval dead time as a single huge slice
-        median_gap = np.median(gaps)
-        cap = median_gap * 3
-        gaps_capped = np.minimum(gaps, cap)
-        dt[0] = gaps_capped[0]
-        dt[-1] = gaps_capped[-1]
-        dt[1:-1] = (gaps_capped[:-1] + gaps_capped[1:]) / 2.0
+        midpoints = (timestamps[:-1] + timestamps[1:]) / 2.0
+        starts = np.empty(len(timestamps))
+        ends = np.empty(len(timestamps))
+        starts[0] = timestamps[0] - (timestamps[1] - timestamps[0]) / 2.0
+        starts[1:] = midpoints
+        ends[:-1] = midpoints
+        ends[-1] = timestamps[-1] + (timestamps[-1] - timestamps[-2]) / 2.0
     else:
-        dt[0] = 1.0
+        starts = np.array([timestamps[0] - 0.5])
+        ends = np.array([timestamps[0] + 0.5])
 
-    T = dt.sum()
-    bubble_sum = np.sum((Q - r_k) * dt)
-    bubble_ratio = bubble_sum / (T * Q)
+    return pd.DataFrame({
+        "start": starts,
+        "end": ends,
+        "timestamp": timestamps,
+        "r_k": grouped["r_k"].values,
+        "n_gpus": grouped["n_gpus"].values,
+    })
+
+
+def compute_bubble(cells: pd.DataFrame, intervals: list[tuple[float, float]], Q: int) -> dict:
+    """Compute bubble ratio by intersecting metric cells with event intervals."""
+    if cells.empty or not intervals:
+        return {
+            "T": 0.0,
+            "Q": Q,
+            "n_samples": 0,
+            "bubble_ratio": 0.0,
+            "utilization": 0.0,
+            "mean_r_k": 0.0,
+        }
+
+    sorted_intervals = sorted((float(s), float(e)) for s, e in intervals if e > s)
+    starts = cells["start"].values
+    ends = cells["end"].values
+    r_k = cells["r_k"].values
+
+    T = 0.0
+    busy_sum = 0.0
+    bubble_sum = 0.0
+    used_samples = set()
+
+    j = 0
+    for s, e in sorted_intervals:
+        while j < len(cells) and ends[j] <= s:
+            j += 1
+        k = j
+        while k < len(cells) and starts[k] < e:
+            overlap = max(0.0, min(ends[k], e) - max(starts[k], s))
+            if overlap > 0:
+                T += overlap
+                busy_sum += r_k[k] * overlap
+                bubble_sum += (Q - r_k[k]) * overlap
+                used_samples.add(k)
+            k += 1
+
+    bubble_ratio = bubble_sum / (T * Q) if T > 0 else 0.0
     utilization = 1.0 - bubble_ratio
 
     return {
         "T": T,
         "Q": Q,
-        "n_samples": len(timestamps),
+        "n_samples": len(used_samples),
         "bubble_ratio": bubble_ratio,
         "utilization": utilization,
-        "mean_r_k": np.mean(r_k),
-        "timestamps": timestamps,
-        "r_k": r_k,
-        "dt": dt,
+        "mean_r_k": busy_sum / T if T > 0 else 0.0,
     }
 
 
-def compute_per_step_bubble(metrics: pd.DataFrame, intervals: list[tuple[float, float]], Q: int) -> pd.DataFrame:
+def compute_per_step_bubble(cells: pd.DataFrame, intervals: list[tuple[float, float]], Q: int) -> pd.DataFrame:
     """Compute bubble ratio per rollout step."""
     rows = []
     for i, (s, e) in enumerate(intervals):
-        ts = metrics["timestamp"].values
-        mask = (ts >= s) & (ts <= e)
-        step_metrics = metrics[mask]
-        if len(step_metrics) == 0:
+        result = compute_bubble(cells, [(s, e)], Q)
+        if result["T"] <= 0:
             continue
-        result = compute_bubble(step_metrics, Q)
         rows.append({
             "step": i + 1,
             "duration": e - s,
+            "sampled_time": result["T"],
             "bubble_ratio": result["bubble_ratio"],
             "utilization": result["utilization"],
             "mean_r_k": result["mean_r_k"],
@@ -200,8 +233,9 @@ def main():
             f"{len(rollout_metrics)} in rollout phases"
         )
 
-        overall = compute_bubble(rollout_metrics, Q)
-        per_step = compute_per_step_bubble(metrics, intervals, Q)
+        cells = build_metric_cells(metrics)
+        overall = compute_bubble(cells, intervals, Q)
+        per_step = compute_per_step_bubble(cells, intervals, Q)
         print_summary(overall, per_step)
         per_step_by_run.append((log_dir.name, per_step))
 

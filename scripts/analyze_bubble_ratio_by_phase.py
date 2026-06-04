@@ -59,69 +59,157 @@ def build_intervals(events: pd.DataFrame) -> list[dict]:
     return intervals
 
 
-def assign_phase(ts: float, intervals: list[dict]) -> str:
-    """Binary search for phase assignment."""
-    lo, hi = 0, len(intervals) - 1
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        iv = intervals[mid]
-        if ts < iv["start"]:
-            hi = mid - 1
-        elif ts > iv["end"]:
-            lo = mid + 1
-        else:
-            return iv["phase"]
-    return "idle"
+def build_training_intervals(events: pd.DataFrame, cells: pd.DataFrame) -> list[tuple[float, float]]:
+    """Use explicit training start/end events when present."""
+    starts = events[
+        (events["event_type"] == "PhaseEvent.STEP_START") & (events["role"] == "training_start")
+    ]["timestamp"].values
+    ends = events[
+        (events["event_type"] == "PhaseEvent.STEP_END") & (events["role"] == "training_end")
+    ]["timestamp"].values
+    if len(starts) > 0 and len(ends) > 0:
+        return [(float(starts[0]), float(ends[-1]))]
+    if cells.empty:
+        return []
+    return [(float(cells["start"].min()), float(cells["end"].max()))]
 
 
-def compute_bubble_by_phase(metrics: pd.DataFrame, intervals: list[dict], Q: int) -> dict:
-    """Compute bubble ratio overall and per phase."""
-    # Group by timestamp
+def build_metric_cells(metrics: pd.DataFrame) -> pd.DataFrame:
+    """Convert point samples into midpoint-bounded time cells."""
     grouped = metrics.groupby("timestamp").agg(
         r_k=("gpu_utilization", lambda x: x.sum() / 100.0),
     ).sort_index()
 
     timestamps = grouped.index.values
-    r_k = grouped["r_k"].values
+    if len(timestamps) == 0:
+        return pd.DataFrame(columns=["start", "end", "timestamp", "r_k"])
 
-    # Assign phase to each timestamp
-    phases = np.array([assign_phase(ts, intervals) for ts in timestamps])
-
-    # Compute dt
-    dt = np.zeros(len(timestamps))
     if len(timestamps) > 1:
-        gaps = np.diff(timestamps)
-        dt[0] = gaps[0]
-        dt[-1] = gaps[-1]
-        dt[1:-1] = (gaps[:-1] + gaps[1:]) / 2.0
+        midpoints = (timestamps[:-1] + timestamps[1:]) / 2.0
+        starts = np.empty(len(timestamps))
+        ends = np.empty(len(timestamps))
+        starts[0] = timestamps[0] - (timestamps[1] - timestamps[0]) / 2.0
+        starts[1:] = midpoints
+        ends[:-1] = midpoints
+        ends[-1] = timestamps[-1] + (timestamps[-1] - timestamps[-2]) / 2.0
+    else:
+        starts = np.array([timestamps[0] - 0.5])
+        ends = np.array([timestamps[0] + 0.5])
 
-    T_total = dt.sum()
-    bubble_total = np.sum((Q - r_k) * dt)
+    return pd.DataFrame({
+        "start": starts,
+        "end": ends,
+        "timestamp": timestamps,
+        "r_k": grouped["r_k"].values,
+    })
 
-    results = {
-        "overall": {
-            "T": T_total,
-            "bubble_ratio": bubble_total / (T_total * Q),
-            "utilization": 1.0 - bubble_total / (T_total * Q),
-            "mean_r_k": np.average(r_k, weights=dt),
-        }
+
+def merge_intervals(intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Merge overlapping intervals."""
+    sorted_intervals = sorted((float(s), float(e)) for s, e in intervals if e > s)
+    merged = []
+    for s, e in sorted_intervals:
+        if not merged or s > merged[-1][1]:
+            merged.append([s, e])
+        else:
+            merged[-1][1] = max(merged[-1][1], e)
+    return [(s, e) for s, e in merged]
+
+
+def subtract_intervals(
+    base_intervals: list[tuple[float, float]],
+    remove_intervals: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Return base intervals after removing all overlapping phase intervals."""
+    remove = merge_intervals(remove_intervals)
+    result = []
+    for base_start, base_end in merge_intervals(base_intervals):
+        cursor = base_start
+        for rem_start, rem_end in remove:
+            if rem_end <= cursor:
+                continue
+            if rem_start >= base_end:
+                break
+            if rem_start > cursor:
+                result.append((cursor, min(rem_start, base_end)))
+            cursor = max(cursor, rem_end)
+            if cursor >= base_end:
+                break
+        if cursor < base_end:
+            result.append((cursor, base_end))
+    return result
+
+
+def integrate_bubble(cells: pd.DataFrame, intervals: list[tuple[float, float]], Q: int) -> dict:
+    """Compute bubble by intersecting metric cells with intervals."""
+    if cells.empty or not intervals:
+        return {"T": 0.0, "bubble_sum": 0.0, "bubble_ratio": 0.0, "utilization": 0.0, "mean_r_k": 0.0}
+
+    intervals = merge_intervals(intervals)
+    starts = cells["start"].values
+    ends = cells["end"].values
+    r_k = cells["r_k"].values
+
+    T = 0.0
+    busy_sum = 0.0
+    bubble_sum = 0.0
+    j = 0
+    for s, e in intervals:
+        while j < len(cells) and ends[j] <= s:
+            j += 1
+        k = j
+        while k < len(cells) and starts[k] < e:
+            overlap = max(0.0, min(ends[k], e) - max(starts[k], s))
+            if overlap > 0:
+                T += overlap
+                busy_sum += r_k[k] * overlap
+                bubble_sum += (Q - r_k[k]) * overlap
+            k += 1
+
+    bubble_ratio = bubble_sum / (T * Q) if T > 0 else 0.0
+    return {
+        "T": float(T),
+        "bubble_sum": float(bubble_sum),
+        "bubble_ratio": float(bubble_ratio),
+        "utilization": float(1.0 - bubble_ratio),
+        "mean_r_k": float(busy_sum / T) if T > 0 else 0.0,
     }
 
-    # Per phase
-    all_phases = ["gen", "reward", "adv", "update_actor", "testing", "idle"]
-    for phase in all_phases:
-        mask = phases == phase
-        if not mask.any():
+
+def compute_bubble_by_phase(metrics: pd.DataFrame, events: pd.DataFrame, intervals: list[dict], Q: int) -> dict:
+    """Compute bubble ratio overall and per phase."""
+    cells = build_metric_cells(metrics)
+    training_intervals = build_training_intervals(events, cells)
+    overall = integrate_bubble(cells, training_intervals, Q)
+    T_total = overall["T"]
+
+    results = {"overall": {
+        "T": overall["T"],
+        "bubble_ratio": overall["bubble_ratio"],
+        "utilization": overall["utilization"],
+        "mean_r_k": overall["mean_r_k"],
+    }}
+
+    phase_intervals = {phase: [] for phase in ["gen", "reward", "adv", "update_actor", "testing"]}
+    for interval in intervals:
+        phase_intervals.setdefault(interval["phase"], []).append((interval["start"], interval["end"]))
+
+    explicit_intervals = []
+    for phase in ["gen", "reward", "adv", "update_actor", "testing"]:
+        explicit_intervals.extend(phase_intervals.get(phase, []))
+    phase_intervals["idle"] = subtract_intervals(training_intervals, explicit_intervals)
+
+    for phase in ["gen", "reward", "adv", "update_actor", "testing", "idle"]:
+        result = integrate_bubble(cells, phase_intervals.get(phase, []), Q)
+        if result["T"] <= 0:
             continue
-        T_phase = dt[mask].sum()
-        bubble_phase = np.sum((Q - r_k[mask]) * dt[mask])
         results[phase] = {
-            "T": T_phase,
-            "time_pct": T_phase / T_total * 100,
-            "bubble_ratio": bubble_phase / (T_phase * Q) if T_phase > 0 else 0,
-            "utilization": 1.0 - bubble_phase / (T_phase * Q) if T_phase > 0 else 0,
-            "mean_r_k": np.average(r_k[mask], weights=dt[mask]) if T_phase > 0 else 0,
-            "bubble_contribution": bubble_phase / (T_total * Q) * 100,  # contribution to overall bubble
+            "T": result["T"],
+            "time_pct": result["T"] / T_total * 100 if T_total > 0 else 0.0,
+            "bubble_ratio": result["bubble_ratio"],
+            "utilization": result["utilization"],
+            "mean_r_k": result["mean_r_k"],
+            "bubble_contribution": result["bubble_sum"] / (T_total * Q) * 100 if T_total > 0 else 0.0,
         }
 
     return results
@@ -167,12 +255,15 @@ def main():
     print(f"Loaded {len(events)} events, {len(metrics)} metric rows ({Q} GPUs)")
 
     intervals = build_intervals(events)
-    results = compute_bubble_by_phase(metrics, intervals, Q)
+    results = compute_bubble_by_phase(metrics, events, intervals, Q)
 
     print_summary(results, Q)
     import json
-    with open(out_dir / f"{experiment_name}_bubble_ratio_by_phase.json", "w") as f:
-        json.dump(results, f)
+    try:
+        with open(out_dir / f"{experiment_name}_bubble_ratio_by_phase.json", "w") as f:
+            json.dump(results, f)
+    except PermissionError as error:
+        print(f"\nWarning: could not write JSON output: {error}", file=sys.stderr)
 
 
 if __name__ == "__main__":
