@@ -25,7 +25,7 @@ mkdir -p "${HF_DATASETS_CACHE}" "${HF_HUB_CACHE}" "${TRANSFORMERS_CACHE}"
 # ============ Base env ============
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1
-export GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
+export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 export EXPERIMENT_NAME="${EXPERIMENT_NAME:-test_long_tail_gen}"
 export AUTO_SELECT_GPUS="${AUTO_SELECT_GPUS:-1}"
 
@@ -237,7 +237,6 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   data.max_response_length="${MAX_RESPONSE_LENGTH}" \
   data.filter_overlong_prompts=True \
   data.truncation='error' \
-  data.seed="${SEED}" \
   reward_model.strategy=fsdp2 \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   actor_rollout_ref.model.use_remove_padding=True \
@@ -269,7 +268,6 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.gpu_memory_utilization="${GPU_MEMORY_UTILIZATION}" \
   actor_rollout_ref.rollout.n="${ROLLOUT_N}" \
-  actor_rollout_ref.rollout.seed="${SEED}" \
   actor_rollout_ref.rollout.free_cache_engine=True \
   actor_rollout_ref.ref.strategy=fsdp2 \
   actor_rollout_ref.ref.entropy_from_logits_with_chunking=True \
