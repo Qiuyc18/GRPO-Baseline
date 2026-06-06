@@ -163,13 +163,37 @@ def test_disabled_and_empty_tree_fallback_behavior():
 
     enabled = _enabled_rollout()
     result = enabled.generate_sequences(
-        inference_engine=_FakeEngine(),
+        inference_engine=_FakeEngine(sample_tokens=[(9, math.log(0.2))]),
         vllm_inputs=[{"prompt_token_ids": [1]}],
         sampling_params=_SamplingParams(),
         response_length=1,
         eos_token_id=2,
     )
-    assert result is None
+    assert result["responses"] == [[9]]
+    assert result["metrics"]["tree_hit_rate"] == 0.0
+    assert result["metrics"]["root_miss_count"] == 1.0
+    assert result["metrics"]["normal_fallback_count"] == 1.0
+
+
+def test_batched_partial_tree_hit_does_not_fallback_entire_batch():
+    rollout = _enabled_rollout()
+    rollout.tree.observe(stable_prompt_key([1]), [3], old_logprobs=[math.log(0.5)])
+    rollout.rng = _FixedRng([0.0])
+    engine = _FakeEngine(score_logprobs={3: math.log(0.8)}, sample_tokens=[(9, math.log(0.2))])
+    result = rollout.generate_sequences(
+        inference_engine=engine,
+        vllm_inputs=[{"prompt_token_ids": [1]}, {"prompt_token_ids": [99]}],
+        sampling_params=_SamplingParams(),
+        response_length=1,
+        eos_token_id=2,
+    )
+    assert result["responses"] == [[3], [9]]
+    assert result["metrics"]["tree_lookup_count"] == 2.0
+    assert result["metrics"]["tree_hit_count"] == 1.0
+    assert result["metrics"]["tree_hit_rate"] == 0.5
+    assert result["metrics"]["root_miss_count"] == 1.0
+    assert result["metrics"]["draft_tokens_proposed"] == 1.0
+    assert result["metrics"]["draft_tokens_accepted"] == 1.0
 
 
 def test_batched_variable_lengths_with_eos():
@@ -220,3 +244,25 @@ def test_update_tree_stores_only_prefix_tokens():
     second_id = rollout.tree.nodes[first_id].children[4]
     assert metrics["history_tree_updated_sequences"] == 1.0
     assert 5 not in rollout.tree.nodes[second_id].children
+
+
+def test_update_tree_uses_generation_prompt_key_when_available():
+    rollout = _enabled_rollout()
+    raw_prompt = [42, 43]
+    generation_key = stable_prompt_key(raw_prompt)
+    batch = DataProto(
+        batch=TensorDict(
+            {
+                "prompts": torch.tensor([[0, 99, 42, 43]]),
+                "responses": torch.tensor([[7]]),
+                "response_mask": torch.tensor([[1]]),
+                "old_log_probs": torch.tensor([[math.log(0.6)]]),
+            },
+            batch_size=[1],
+        ),
+        non_tensor_batch={"history_tree_prompt_keys": np.array([generation_key], dtype=object)},
+    )
+    metrics = rollout.update_tree_from_batch(batch)
+    assert metrics["history_tree_updated_sequences"] == 1.0
+    assert rollout.tree.find_node(generation_key, []) is not None
+    assert rollout.tree.find_node(stable_prompt_key([99, 42, 43]), []) is None
