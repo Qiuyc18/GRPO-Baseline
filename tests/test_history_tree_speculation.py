@@ -2,8 +2,11 @@ import math
 import random
 from types import SimpleNamespace
 
+import numpy as np
 import torch
+from tensordict import TensorDict
 
+from verl import DataProto
 from verl.workers.rollout.history_tree_speculation import (
     DraftProposal,
     HistoryTreeSpeculativeRollout,
@@ -194,3 +197,26 @@ def test_policy_version_cache_invalidation():
     cache.bump_policy_version()
     assert cache.policy_version == 1
     assert cache.get("k", "prompt-a") is None
+
+
+def test_update_tree_stores_only_prefix_tokens():
+    rollout = _enabled_rollout(max_tokens_to_store=2)
+    batch = DataProto(
+        batch=TensorDict(
+            {
+                "prompts": torch.tensor([[10, 11]]),
+                "responses": torch.tensor([[3, 4, 5, 6]]),
+                "response_mask": torch.tensor([[1, 1, 1, 1]]),
+                "old_log_probs": torch.tensor([[math.log(0.4), math.log(0.3), math.log(0.2), math.log(0.1)]]),
+                "token_level_scores": torch.tensor([[0.0, 0.0, 0.0, 1.0]]),
+            },
+            batch_size=[1],
+        ),
+        non_tensor_batch={"uid": np.array(["u0"], dtype=object)},
+    )
+    metrics = rollout.update_tree_from_batch(batch)
+    root_id = rollout.tree.find_node(stable_prompt_key([10, 11]), [])
+    first_id = rollout.tree.nodes[root_id].children[3]
+    second_id = rollout.tree.nodes[first_id].children[4]
+    assert metrics["history_tree_updated_sequences"] == 1.0
+    assert 5 not in rollout.tree.nodes[second_id].children

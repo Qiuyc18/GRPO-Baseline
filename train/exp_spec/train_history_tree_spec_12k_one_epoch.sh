@@ -144,6 +144,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   actor_rollout_ref.rollout.history_tree_speculation.enabled=True \
   actor_rollout_ref.rollout.history_tree_speculation.max_depth="${SPEC_MAX_DEPTH:-1}" \
   actor_rollout_ref.rollout.history_tree_speculation.max_branch_width="${SPEC_MAX_BRANCH_WIDTH:-8}" \
+  actor_rollout_ref.rollout.history_tree_speculation.max_tokens_to_store="${SPEC_MAX_TOKENS_TO_STORE:-1024}" \
   actor_rollout_ref.rollout.history_tree_speculation.min_visits="${SPEC_MIN_VISITS:-1}" \
   actor_rollout_ref.rollout.history_tree_speculation.use_reward_prior="${SPEC_USE_REWARD_PRIOR:-False}" \
   actor_rollout_ref.rollout.history_tree_speculation.use_nll_prior="${SPEC_USE_NLL_PRIOR:-True}" \
