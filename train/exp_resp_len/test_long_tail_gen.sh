@@ -26,7 +26,7 @@ mkdir -p "${HF_DATASETS_CACHE}" "${HF_HUB_CACHE}" "${TRANSFORMERS_CACHE}"
 export HOST_CHECKPOINT_PATH="${HOST_CHECKPOINT_PATH:-/etc/moreh/checkpoint}"
 export RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=1
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
-export EXPERIMENT_NAME="${EXPERIMENT_NAME:-test_long_tail_gen}"
+export EXPERIMENT_NAME="${EXPERIMENT_NAME:-test_long_tail_gen_2}"
 export AUTO_SELECT_GPUS="${AUTO_SELECT_GPUS:-1}"
 
 # Optional: pin this run to specific devices, for example GPU_DEVICES=0,1,2,3.
@@ -68,7 +68,7 @@ export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.78}"
 export MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-32768}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 export SAVE_FREQ="${SAVE_FREQ:--1}"
-export TEST_FREQ="${TEST_FREQ:-20}"
+export TEST_FREQ="${TEST_FREQ:-5}"
 export CLEAN_OLD_CKPT="${CLEAN_OLD_CKPT:-1}"
 export SKIP_MODEL_LOAD_TEST="${SKIP_MODEL_LOAD_TEST:-0}"
 export FOLLOW_LOG="${FOLLOW_LOG:-1}"
@@ -286,7 +286,7 @@ nohup env PYTHONUNBUFFERED=1 python3 "${PROJECT_ROOT}/monitor/launch_verl.py" \
   trainer.save_freq="${SAVE_FREQ}" \
   trainer.test_freq="${TEST_FREQ}" \
   trainer.validation_data_dir="${VALIDATION_DATA_DIR}" \
-  trainer.val_before_train=False \
+  trainer.val_before_train=True \
   trainer.total_epochs="${TOTAL_EPOCHS}" \
   trainer.max_actor_ckpt_to_keep=3 \
   > "${LOG_FILE}" 2>&1 &
