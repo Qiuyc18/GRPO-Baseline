@@ -49,13 +49,19 @@ class _FakeEngine:
 
     def generate(self, prompts, sampling_params, lora_request=None, use_tqdm=False):
         if getattr(sampling_params, "prompt_logprobs", None) is not None:
-            token_id = prompts[0]["prompt_token_ids"][-1]
-            logp = self.score_logprobs[token_id]
-            prompt_logprobs = [None] * (len(prompts[0]["prompt_token_ids"]) - 1)
-            prompt_logprobs.append({token_id: _LogProb(logp)})
-            return [_Output(sample_token=0, sample_logprob=0.0, prompt_logprobs=prompt_logprobs)]
-        token_id, logp = self.sample_tokens.pop(0)
-        return [_Output(sample_token=token_id, sample_logprob=logp)]
+            outputs = []
+            for prompt in prompts:
+                token_id = prompt["prompt_token_ids"][-1]
+                logp = self.score_logprobs[token_id]
+                prompt_logprobs = [None] * (len(prompt["prompt_token_ids"]) - 1)
+                prompt_logprobs.append({token_id: _LogProb(logp)})
+                outputs.append(_Output(sample_token=0, sample_logprob=0.0, prompt_logprobs=prompt_logprobs))
+            return outputs
+        outputs = []
+        for _ in prompts:
+            token_id, logp = self.sample_tokens.pop(0)
+            outputs.append(_Output(sample_token=token_id, sample_logprob=logp))
+        return outputs
 
 
 class _FixedRng:
