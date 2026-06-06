@@ -24,7 +24,7 @@ PHASE_COLORS = {
     "adv": "#55A868",
     "update_actor": "#C44E52",
     "testing": "#8172B3",
-    "idle": "#CCCCCC",
+    "unlabeled": "#CCCCCC",
 }
 
 PHASE_LABELS = {
@@ -33,7 +33,7 @@ PHASE_LABELS = {
     "adv": "Advantage Calc",
     "update_actor": "Actor Update",
     "testing": "Testing",
-    "idle": "Idle",
+    "unlabeled": "Unlabeled / Overhead",
 }
 
 
@@ -50,55 +50,165 @@ def build_intervals(events: pd.DataFrame) -> list[dict]:
     return intervals
 
 
-def assign_phase(ts: float, intervals: list[dict]) -> str:
-    """Binary search to find which phase a timestamp belongs to."""
-    lo, hi = 0, len(intervals) - 1
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        iv = intervals[mid]
-        if ts < iv["start"]:
-            hi = mid - 1
-        elif ts > iv["end"]:
-            lo = mid + 1
+def merge_intervals(intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Merge overlapping intervals."""
+    sorted_intervals = sorted((float(s), float(e)) for s, e in intervals if e > s)
+    merged = []
+    for s, e in sorted_intervals:
+        if not merged or s > merged[-1][1]:
+            merged.append([s, e])
         else:
-            return iv["phase"]
-    return "idle"
+            merged[-1][1] = max(merged[-1][1], e)
+    return [(s, e) for s, e in merged]
 
 
-def compute_stats(metrics: pd.DataFrame, intervals: list[dict], total_duration: float):
+def subtract_intervals(
+    base_intervals: list[tuple[float, float]],
+    remove_intervals: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Return base intervals after removing all labeled phase intervals."""
+    remove = merge_intervals(remove_intervals)
+    result = []
+    for base_start, base_end in merge_intervals(base_intervals):
+        cursor = base_start
+        for rem_start, rem_end in remove:
+            if rem_end <= cursor:
+                continue
+            if rem_start >= base_end:
+                break
+            if rem_start > cursor:
+                result.append((cursor, min(rem_start, base_end)))
+            cursor = max(cursor, rem_end)
+            if cursor >= base_end:
+                break
+        if cursor < base_end:
+            result.append((cursor, base_end))
+    return result
+
+
+def build_metric_cells(metrics: pd.DataFrame) -> pd.DataFrame:
+    """Convert point samples into midpoint-bounded time cells."""
+    timestamps = np.sort(metrics["timestamp"].unique())
+    if len(timestamps) == 0:
+        return pd.DataFrame(columns=["timestamp", "start", "end"])
+
+    if len(timestamps) > 1:
+        midpoints = (timestamps[:-1] + timestamps[1:]) / 2.0
+        starts = np.empty(len(timestamps))
+        ends = np.empty(len(timestamps))
+        starts[0] = timestamps[0] - (timestamps[1] - timestamps[0]) / 2.0
+        starts[1:] = midpoints
+        ends[:-1] = midpoints
+        ends[-1] = timestamps[-1] + (timestamps[-1] - timestamps[-2]) / 2.0
+    else:
+        starts = np.array([timestamps[0] - 0.5])
+        ends = np.array([timestamps[0] + 0.5])
+
+    return pd.DataFrame({"timestamp": timestamps, "start": starts, "end": ends})
+
+
+def build_training_intervals(events: pd.DataFrame, cells: pd.DataFrame) -> list[tuple[float, float]]:
+    """Use explicit training start/end events when present."""
+    starts = events[
+        (events["event_type"] == "PhaseEvent.STEP_START") & (events["role"] == "training_start")
+    ]["timestamp"].values
+    ends = events[
+        (events["event_type"] == "PhaseEvent.STEP_END") & (events["role"] == "training_end")
+    ]["timestamp"].values
+    if len(starts) > 0 and len(ends) > 0:
+        return [(float(starts[0]), float(ends[-1]))]
+    if cells.empty:
+        return []
+    return [(float(cells["start"].min()), float(cells["end"].max()))]
+
+
+def interval_duration(intervals: list[tuple[float, float]]) -> float:
+    """Total duration after merging intervals."""
+    return sum(e - s for s, e in merge_intervals(intervals))
+
+
+def overlap_weights(cells: pd.DataFrame, intervals: list[tuple[float, float]]) -> pd.DataFrame:
+    """Return timestamp weights equal to overlap duration with intervals."""
+    if cells.empty or not intervals:
+        return pd.DataFrame(columns=["timestamp", "weight"])
+
+    intervals = merge_intervals(intervals)
+    starts = cells["start"].values
+    ends = cells["end"].values
+    timestamps = cells["timestamp"].values
+    weights = np.zeros(len(cells), dtype=float)
+
+    j = 0
+    for s, e in intervals:
+        while j < len(cells) and ends[j] <= s:
+            j += 1
+        k = j
+        while k < len(cells) and starts[k] < e:
+            weights[k] += max(0.0, min(ends[k], e) - max(starts[k], s))
+            k += 1
+
+    mask = weights > 0
+    return pd.DataFrame({"timestamp": timestamps[mask], "weight": weights[mask]})
+
+
+def weighted_quantile(values: np.ndarray, weights: np.ndarray, q: float) -> float:
+    """Compute a weighted quantile for non-empty arrays."""
+    if len(values) == 0 or weights.sum() <= 0:
+        return 0.0
+    order = np.argsort(values)
+    sorted_values = values[order]
+    sorted_weights = weights[order]
+    cdf = np.cumsum(sorted_weights)
+    cutoff = q * sorted_weights.sum()
+    return float(sorted_values[np.searchsorted(cdf, cutoff, side="left")])
+
+
+def compute_stats(
+    events: pd.DataFrame,
+    metrics: pd.DataFrame,
+    intervals: list[dict],
+):
     """Compute per-phase time and GPU utilization statistics."""
-    # Phase durations
-    phase_durations = {}
-    for iv in intervals:
-        p = iv["phase"]
-        phase_durations[p] = phase_durations.get(p, 0.0) + (iv["end"] - iv["start"])
-    idle_time = total_duration - sum(phase_durations.values())
-    phase_durations["idle"] = max(idle_time, 0.0)
+    cells = build_metric_cells(metrics)
+    training_intervals = build_training_intervals(events, cells)
+    total_duration = interval_duration(training_intervals)
 
-    # Assign each metric row to a phase
-    timestamps = metrics["timestamp"].values
-    phases = np.array([assign_phase(ts, intervals) for ts in timestamps])
-    metrics = metrics.copy()
-    metrics["phase"] = phases
+    phase_intervals = {phase: [] for phase in ["gen", "reward", "adv", "update_actor", "testing"]}
+    for iv in intervals:
+        phase_intervals.setdefault(iv["phase"], []).append((iv["start"], iv["end"]))
+
+    labeled_intervals = []
+    for phase in ["gen", "reward", "adv", "update_actor", "testing"]:
+        labeled_intervals.extend(phase_intervals.get(phase, []))
+    phase_intervals["unlabeled"] = subtract_intervals(training_intervals, labeled_intervals)
+
+    phase_durations = {
+        phase: interval_duration(phase_intervals.get(phase, []))
+        for phase in PHASE_LABELS
+    }
 
     # Per-phase GPU utilization stats
     phase_stats = {}
-    for phase in list(PHASE_LABELS.keys()):
-        mask = metrics["phase"] == phase
-        subset = metrics.loc[mask, "gpu_utilization"]
-        if len(subset) == 0:
+    for phase in PHASE_LABELS:
+        weights = overlap_weights(cells, phase_intervals.get(phase, []))
+        if weights.empty:
             phase_stats[phase] = {"mean": 0, "p50": 0, "p95": 0, "mem_mean": 0, "count": 0}
-        else:
-            mem_subset = metrics.loc[mask, "memory_utilization"]
-            phase_stats[phase] = {
-                "mean": subset.mean(),
-                "p50": subset.median(),
-                "p95": subset.quantile(0.95),
-                "mem_mean": mem_subset.mean(),
-                "count": len(subset),
-            }
+            continue
 
-    return phase_durations, phase_stats
+        weighted = metrics.merge(weights, on="timestamp", how="inner")
+        util = weighted["gpu_utilization"].to_numpy(dtype=float)
+        mem = weighted["memory_utilization"].to_numpy(dtype=float)
+        sample_weights = weighted["weight"].to_numpy(dtype=float)
+
+        phase_stats[phase] = {
+            "mean": float(np.average(util, weights=sample_weights)),
+            "p50": weighted_quantile(util, sample_weights, 0.50),
+            "p95": weighted_quantile(util, sample_weights, 0.95),
+            "mem_mean": float(np.average(mem, weights=sample_weights)),
+            "count": len(weighted),
+        }
+
+    return phase_durations, phase_stats, total_duration
 
 
 def print_summary(phase_durations: dict, phase_stats: dict, total_duration: float):
@@ -111,7 +221,7 @@ def print_summary(phase_durations: dict, phase_stats: dict, total_duration: floa
     print(header)
     print("-" * len(header))
 
-    ordered = ["gen", "update_actor", "reward", "adv", "testing", "idle"]
+    ordered = ["gen", "update_actor", "reward", "adv", "testing", "unlabeled"]
     for phase in ordered:
         dur = phase_durations.get(phase, 0)
         pct = dur / total_duration * 100 if total_duration > 0 else 0
@@ -123,14 +233,15 @@ def print_summary(phase_durations: dict, phase_stats: dict, total_duration: floa
         )
 
     # Overall
-    active_phases = [p for p in ordered if p != "idle"]
+    active_phases = [p for p in ordered if p != "unlabeled"]
     active_dur = sum(phase_durations.get(p, 0) for p in active_phases)
-    print(f"\nActive GPU time ratio: {active_dur / total_duration * 100:.1f}%")
+    print(f"\nLabeled phase time ratio: {active_dur / total_duration * 100:.1f}%")
+    print("Unlabeled / Overhead is time not covered by known phase events; it is not GPU idle.")
 
 
 def plot_charts(phase_durations: dict, phase_stats: dict, total_duration: float, output_dir: Path):
     """Generate bar charts."""
-    ordered = ["gen", "update_actor", "reward", "adv", "testing", "idle"]
+    ordered = ["gen", "update_actor", "reward", "adv", "testing", "unlabeled"]
     # Filter out phases with 0 duration
     ordered = [p for p in ordered if phase_durations.get(p, 0) > 0]
     labels = [PHASE_LABELS[p] for p in ordered]
@@ -211,10 +322,8 @@ def main():
     print(f"  Events: {len(events)} rows, Metrics: {len(metrics)} rows ({metrics['gpu_id'].nunique()} GPUs)")
 
     intervals = build_intervals(events)
-    total_duration = events["timestamp"].max() - events["timestamp"].min()
-
     print("Computing statistics...")
-    phase_durations, phase_stats = compute_stats(metrics, intervals, total_duration)
+    phase_durations, phase_stats, total_duration = compute_stats(events, metrics, intervals)
 
     print_summary(phase_durations, phase_stats, total_duration)
 
